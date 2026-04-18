@@ -91,6 +91,30 @@ def backfill_unii(db_path=ENRICHED_DB) -> None:
     logger.info(f"UNII backfill: {updated}/{len(rows)} rows populated")
 
 
+def backfill_unii_from_pubchem_synonyms(db_path=ENRICHED_DB) -> None:
+    """Extract UNII codes from PubChem synonym lists for canonicals with a PubChem_CID."""
+    from enrichment.sources.pubchem import PubChemClient
+    client = PubChemClient(db_path)
+    with sqlite3.connect(db_path, timeout=30) as conn:
+        rows = conn.execute(
+            "SELECT Id, Name, PubChem_CID FROM Ingredient_Canonical "
+            "WHERE PubChem_CID IS NOT NULL AND UNII_Code IS NULL"
+        ).fetchall()
+    logger.info(f"PubChem UNII backfill: {len(rows)} canonicals to process")
+    updated = 0
+    for canonical_id, name, cid in rows:
+        unii = client.get_unii_from_synonyms(cid)
+        if unii:
+            with sqlite3.connect(db_path, timeout=30) as w:
+                w.execute(
+                    "UPDATE Ingredient_Canonical SET UNII_Code = ? WHERE Id = ?",
+                    (unii, canonical_id)
+                )
+            logger.info(f"  UNII set: {name} (CID={cid}) → {unii}")
+            updated += 1
+    logger.info(f"PubChem UNII backfill: {updated}/{len(rows)} rows populated")
+
+
 def backfill_match_scores(db_path=ENRICHED_DB) -> None:
     """Re-compute MatchScore for fuzzy-matched SKU_To_Canonical rows (no API calls)."""
     from rapidfuzz import fuzz

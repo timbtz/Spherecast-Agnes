@@ -9,12 +9,12 @@
 | Layer | Status | Notes |
 |---|---|---|
 | `schema/enriched_schema.sql` | ✅ v1.1 | 15 new columns; Supplier_Commercial.Confidence TEXT→REAL fixed |
-| `db_enriched.sqlite` | ✅ v1.1 — all phases run | 112 SMILES, 44 UNII codes, 515 BOM rows, 126 compliance rows, 129 CO rows (formula fixed), 4 sub edges; MatchScore backfilled (854 rows) |
+| `db_enriched.sqlite` | ✅ v1.1 — all phases run | 111 SMILES, 129 UNII codes (50.2%), 515 BOM rows, 126 compliance rows, 126 CO rows; Vitamin C merged → 33 companies |
 | Phase 1 — Ingredient Identity | ✅ Complete | Display name fix + Sucralose guard; SMILES/UNII backfill done |
 | Phase 2 — BOM Quantities | ✅ Complete | 515 rows, 87/149 FG covered (58%); fingerprint match: brand+ingredient query + overlap≥2 |
 | Phase 3 — Commercial/Compliance | ✅ Complete | 126 rows, 66 products, 9 cert types; fixed stmt.notes key + Phase 2 label reuse |
 | Phase 4 — Reasoning/Proposals | ⏳ Scorer ✅ formula fixed, proposals blocked | 129 CO rows; correct formula (fragmentation+supplier_spread); _upsert dedup bug fixed; proposals need ANTHROPIC_API_KEY |
-| `enrichment/sources/pubchem.py` | ✅ Implemented | Added get_isomeric_smiles(); rate-limited (4.5 req/sec), cache-first |
+| `enrichment/sources/pubchem.py` | ✅ Implemented | Added get_isomeric_smiles() + get_unii_from_synonyms(); rate-limited (4.5 req/sec), cache-first |
 | `enrichment/sources/dsld.py` | ✅ Implemented | DSLD v9, cached |
 | `enrichment/sources/molport.py` | ✅ Stub | Graceful no-op if MOLPORT_API_KEY absent; CAS→SMILES→supplier chain |
 | `enrichment/db_migrate_v11.py` | ✅ New | Idempotent v1.1 migration; called by db_bootstrap.py |
@@ -52,7 +52,7 @@ Fields to add per PRD §7:
 
 ## Arcs — Problems, Findings, Limitations
 
-**[PENDING DSLD KEY]** Vitamin C (25 co.) and Ascorbic Acid (17 co.) are still two canonical rows — `dedup_by_unii()` is coded in `fuzzy_matcher.py` but needs UNII_Code populated first (requires DSLD_API_KEY + `backfill_phase1.py`).
+**[FIXED]** Vitamin C (33 co.) merged from Vitamin C (25 co.) + l-ascorbic acid (17 co.) via PubChem synonym UNII backfill. `get_unii_from_synonyms()` added to PubChemClient; 88/90 CID-bearing canonicals populated. dedup_by_unii() got CAS-differs guard to block false positives (elemental Zn/Mg/Cr UNIIs shared with chelated forms).
 
 **[FIXED]** Display name fix added to `ingredient_normalizer.py` Tier 1: DSLD common name overrides PubChem IUPAC if ≤60 chars. Will apply on next Phase 1 re-run.
 
@@ -78,7 +78,9 @@ Fields to add per PRD §7:
 
 **[KNOWN LIMIT]** SubstitutionGraphBuilder: 38/40 rules skip due to canonical name mismatch (e.g. rule uses "Cholecalciferol" but canonical is stored as "Vitamin D"). Rules use COLLATE NOCASE exact match. Fix: update Ingredient_Substitution_Rule.Name_A/B to match Ingredient_Canonical.Name exactly.
 
-**[KNOWN LIMIT]** DSLD UNII backfill: 0 new codes added despite DSLD_API_KEY present. DSLD ingredient rows have sparse uniiCode coverage for excipients/trade-name ingredients. The 44 existing codes came from Phase 1 DSLD product search, not this backfill path.
+**[FIXED]** UNII backfill: PubChem synonym extraction (`get_unii_from_synonyms()`) replaced DSLD path. 88/90 CID-bearing canonicals populated. UNII coverage: 44→129 (17%→50.2%). DSLD UNII backfill deprecated for this dataset (DSLD has sparse uniiCode on excipients/trade-name ingredients).
+
+**[KNOWN LIMIT]** 3 UNII duplicate pairs intentionally skipped by CAS-differs guard: Chrome/Chromium nicotinate (7440-47-3 vs 64452-96-6), Magnesium sheet/Magnesia (7439-95-4 vs 1309-48-4), Zinc dust/Zinc glycinate (7440-66-6 vs 14281-83-5). PubChem assigns elemental UNII to both elemental and compound forms — dedup guard correct.
 
 ---
 

@@ -102,6 +102,21 @@ def dedup_by_unii(conn: sqlite3.Connection) -> list[tuple[int, int, str]]:
         drop_names = [n for i, n in zip(all_ids, all_names) if i != keep_id]
 
         for drop_id, drop_name in zip(drop_ids, drop_names):
+            # Safety: if both rows have CAS numbers and they differ, they're provably different
+            # compounds (e.g. elemental Zn vs Zinc glycinate sharing elemental UNII). Skip.
+            keep_cas = cur.execute(
+                "SELECT CAS_Number FROM Ingredient_Canonical WHERE Id = ?", (keep_id,)
+            ).fetchone()[0]
+            drop_cas = cur.execute(
+                "SELECT CAS_Number FROM Ingredient_Canonical WHERE Id = ?", (drop_id,)
+            ).fetchone()[0]
+            if keep_cas and drop_cas and keep_cas != drop_cas:
+                logger.warning(
+                    f"UNII {unii}: skipping merge — CAS mismatch "
+                    f"({keep_cas} vs {drop_cas}) for {drop_name!r}"
+                )
+                continue
+
             # Re-point SKU_To_Canonical; use OR IGNORE to skip conflicts (same product mapped to both)
             cur.execute(
                 "UPDATE OR IGNORE SKU_To_Canonical SET CanonicalId = ? WHERE CanonicalId = ?",
@@ -122,6 +137,12 @@ def dedup_by_unii(conn: sqlite3.Connection) -> list[tuple[int, int, str]]:
             # Remove self-referencing rows created by the merge
             cur.execute(
                 "DELETE FROM Ingredient_Substitution WHERE IngredientAId = IngredientBId"
+            )
+
+            # Remove CO row for dropped canonical (scorer re-run will regenerate with merged data)
+            cur.execute(
+                "DELETE FROM Consolidation_Opportunity WHERE CanonicalIngredientId = ?",
+                (drop_id,)
             )
 
             cur.execute("DELETE FROM Ingredient_Canonical WHERE Id = ?", (drop_id,))

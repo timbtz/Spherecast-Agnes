@@ -137,6 +137,22 @@ class PubChemClient:
         except Exception:
             pass
 
+    def get_unii_from_synonyms(self, cid: int) -> str | None:
+        """Return FDA UNII code for a PubChem CID by scanning its synonym list.
+
+        UNII codes are exactly 10 uppercase alphanumeric characters. PubChem
+        includes them in the synonym list for most pharmaceutical/supplement
+        compounds registered with FDA.
+        """
+        cache_key = f"unii_cid_{cid}"
+        in_cache, cached = self._get_cache(cache_key)
+        if in_cache:
+            return cached
+        synonyms = self._get_synonyms(cid)
+        unii = next((s for s in synonyms if re.fullmatch(r"[A-Z0-9]{10}", s)), None)
+        self._set_cache(cache_key, unii)
+        return unii
+
     def get_isomeric_smiles(self, cid: int) -> str | None:
         """Return IsomericSMILES for a PubChem CID. Cache-first, permanent TTL."""
         cache_key = f"smiles_{cid}"
