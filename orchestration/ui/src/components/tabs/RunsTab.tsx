@@ -34,7 +34,7 @@ export function RunsTab({ onSelectRun }: { onSelectRun?: (run: PipelineRun) => v
         Pipeline Runs <span className="text-sm font-normal text-slate-400">({data.runs.length})</span>
       </h2>
       <div className="divide-y divide-slate-700">
-        {data.runs.map(run => (
+        {data.runs.map((run: PipelineRun) => (
           <div
             key={run.id}
             className="px-4 py-3 hover:bg-slate-800 cursor-pointer flex items-center justify-between"

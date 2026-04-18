@@ -7,6 +7,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from orchestration.api import db as _db
@@ -43,7 +44,15 @@ _UI_DIST = Path(__file__).parent.parent / "ui" / "dist"
 _UI_DEV = Path(__file__).parent.parent / "ui"
 _SERVE = _UI_DIST if _UI_DIST.exists() else _UI_DEV
 if _SERVE.exists():
-    app.mount("/ui", StaticFiles(directory=str(_SERVE), html=True), name="ui")
+    app.mount("/ui/assets", StaticFiles(directory=str(_SERVE / "assets")), name="ui-assets")
+
+    @app.get("/ui", include_in_schema=False)
+    @app.get("/ui/", include_in_schema=False)
+    def ui_index():
+        return FileResponse(
+            str(_SERVE / "index.html"),
+            headers={"Cache-Control": "no-store"},
+        )
 
 
 @app.get("/health")

@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
 import { useCompliance } from '@/hooks/useData'
+import type { ComplianceRow } from '@/types/agnes'
 
 function SkeletonRow() {
   return (
@@ -16,14 +17,14 @@ export function ComplianceTab() {
   const [filterCert, setFilterCert] = useState('')
 
   const allCerts = useMemo(() => {
-    if (!data) return []
-    return [...new Set(data.compliance.map(r => r.cert_type))].sort()
+    if (!data) return [] as string[]
+    return [...new Set(data.compliance.map((r: ComplianceRow) => r.cert_type))].sort()
   }, [data])
 
   const productCertMap = useMemo(() => {
     if (!data) return new Map<string, Set<string>>()
     const map = new Map<string, Set<string>>()
-    for (const row of data.compliance) {
+    for (const row of data.compliance as ComplianceRow[]) {
       const key = `${row.product_id}|${row.company}`
       if (!map.has(key)) map.set(key, new Set())
       if (row.status === 'certified' || row.status === 'implied') {
@@ -36,8 +37,8 @@ export function ComplianceTab() {
   const visibleCerts = filterCert ? [filterCert] : allCerts.slice(0, 6)
 
   const products = useMemo(() => {
-    return [...new Set(data?.compliance.map(r => `${r.product_id}|${r.company}`) ?? [])]
-      .sort((a, b) => a.split('|')[1].localeCompare(b.split('|')[1]))
+    return [...new Set((data?.compliance as ComplianceRow[] | undefined)?.map((r: ComplianceRow) => `${r.product_id}|${r.company}`) ?? [])]
+      .sort((a: string, b: string) => a.split('|')[1].localeCompare(b.split('|')[1]))
   }, [data])
 
   return (
@@ -53,7 +54,7 @@ export function ComplianceTab() {
           className="bg-slate-700 border border-slate-600 text-slate-300 text-sm rounded px-2 py-1"
         >
           <option value="">All cert types</option>
-          {allCerts.map(c => <option key={c} value={c}>{c}</option>)}
+          {allCerts.map((c: string) => <option key={c} value={c}>{c}</option>)}
         </select>
       </div>
       {error && <p className="text-red-400 text-sm">Failed to load compliance data</p>}
@@ -62,19 +63,19 @@ export function ComplianceTab() {
           <thead>
             <tr className="border-b border-slate-600 text-slate-400 text-left">
               <th className="px-3 py-2 font-medium">Company</th>
-              {visibleCerts.map(c => <th key={c} className="px-3 py-2 font-medium text-center text-xs">{c}</th>)}
+              {visibleCerts.map((c: string) => <th key={c} className="px-3 py-2 font-medium text-center text-xs">{c}</th>)}
             </tr>
           </thead>
           <tbody>
             {isLoading
               ? Array.from({ length: 8 }).map((_, i) => <SkeletonRow key={i} />)
-              : products.map(key => {
+              : products.map((key: string) => {
                 const [, company] = key.split('|')
-                const certs = productCertMap.get(key) ?? new Set()
+                const certs = productCertMap.get(key) ?? new Set<string>()
                 return (
                   <tr key={key} className="border-b border-slate-700 hover:bg-slate-800">
                     <td className="px-3 py-2 text-slate-200 font-medium text-xs">{company}</td>
-                    {visibleCerts.map(c => (
+                    {visibleCerts.map((c: string) => (
                       <td key={c} className="px-3 py-2 text-center">
                         {certs.has(c)
                           ? <span className="text-green-400 font-bold">✓</span>

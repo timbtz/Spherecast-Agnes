@@ -60,7 +60,7 @@ export function ProposalsTab({ onSpeak }: { onSpeak?: (text: string) => void }) 
         Proposals <span className="text-sm font-normal text-slate-400">({data.proposals.length})</span>
       </h2>
       <div className="space-y-4">
-        {data.proposals.map((p, i) => <ProposalCard key={i} proposal={p} onSpeak={onSpeak} />)}
+        {data.proposals.map((p: Proposal, i: number) => <ProposalCard key={i} proposal={p} onSpeak={onSpeak} />)}
       </div>
     </div>
   )

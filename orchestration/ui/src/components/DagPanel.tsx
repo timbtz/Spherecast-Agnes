@@ -44,7 +44,7 @@ export function DagPanel() {
     }
   }
 
-  const nodeMap = Object.fromEntries((pipelineGraph?.nodes ?? []).map(n => [n.id, n]))
+  const nodeMap = Object.fromEntries((pipelineGraph?.nodes ?? []).map((n: { id: string; class: string; type: string; when?: string }) => [n.id, n]))
 
   return (
     <div className="w-full">
@@ -55,7 +55,7 @@ export function DagPanel() {
           className="flex-1 bg-slate-700 border border-slate-600 text-slate-300 text-sm rounded px-2 py-1.5 min-w-0"
         >
           <option value="">Select pipeline…</option>
-          {pipelinesData?.pipelines.map(p => <option key={p} value={p}>{p.replace(/_/g, ' ')}</option>)}
+          {pipelinesData?.pipelines.map((p: string) => <option key={p} value={p}>{p.replace(/_/g, ' ')}</option>)}
         </select>
         <input
           value={ingredient}
@@ -76,10 +76,10 @@ export function DagPanel() {
         <div className="overflow-x-auto">
           <div className="text-xs text-slate-400 mb-2">{pipelineGraph.name} · {pipelineGraph.nodes.length} nodes</div>
           <div className="flex gap-4 items-start pb-2">
-            {pipelineGraph.layers.map((layer, li) => (
+            {pipelineGraph.layers.map((layer: string[], li: number) => (
               <div key={li} className="flex items-start gap-4">
                 <div className="flex flex-col gap-2">
-                  {layer.map(nodeId => {
+                  {layer.map((nodeId: string) => {
                     const node = nodeMap[nodeId]
                     const state = nodeStates[nodeId] ?? { state: 'pending' as const }
                     return node ? (

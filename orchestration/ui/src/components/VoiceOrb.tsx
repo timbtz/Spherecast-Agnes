@@ -1,4 +1,4 @@
-import { useRef, useEffect, Component } from 'react'
+import { Component, useRef, useEffect } from 'react'
 import type { ReactNode } from 'react'
 import { Orb } from '@/components/ui/orb'
 import { useAgnesVoice } from '@/hooks/useAgnesVoice'
@@ -23,7 +23,7 @@ const STATE_LABEL: Record<string, string> = {
   talking: 'Agnes responding…',
 }
 
-export function VoiceOrb({ onSpeak }: { onSpeak?: (text: string) => void }) {
+export function VoiceOrb({ onSpeak: _onSpeak }: { onSpeak?: (text: string) => void }) {
   const { agentState, lastPipeline, transcript, inputVolumeRef, outputVolumeRef, startListening } = useAgnesVoice()
   const colors = PIPELINE_COLORS[lastPipeline ?? 'default'] ?? PIPELINE_COLORS.default
   const transcriptTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)

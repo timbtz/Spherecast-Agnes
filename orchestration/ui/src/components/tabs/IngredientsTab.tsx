@@ -77,7 +77,7 @@ export function IngredientsTab() {
           <tbody>
             {isLoading
               ? Array.from({ length: 8 }).map((_, i) => <SkeletonRow key={i} />)
-              : data?.ingredients.map(ing => (
+              : data?.ingredients.map((ing: import('@/types/agnes').Ingredient) => (
                 <tr
                   key={ing.id}
                   className="border-b border-slate-700 hover:bg-slate-800 cursor-pointer"

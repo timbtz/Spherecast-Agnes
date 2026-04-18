@@ -109,8 +109,14 @@ export function useAgnesVoice() {
   }, [speak, setActiveRun, updateNode])
 
   const startListening = useCallback(() => {
-    const SpeechRec = (window as unknown as { SpeechRecognition?: { new(): SpeechRecognition }; webkitSpeechRecognition?: { new(): SpeechRecognition } }).SpeechRecognition
-      ?? (window as unknown as { webkitSpeechRecognition?: { new(): SpeechRecognition } }).webkitSpeechRecognition
+    type SpeechRecognitionCtor = { new(): {
+      continuous: boolean; lang: string; start(): void; stop(): void;
+      onresult: ((e: { results: { [i: number]: { [j: number]: { transcript: string } } } }) => void) | null;
+      onerror: (() => void) | null;
+      onend: (() => void) | null;
+    }}
+    const win = window as unknown as { SpeechRecognition?: SpeechRecognitionCtor; webkitSpeechRecognition?: SpeechRecognitionCtor }
+    const SpeechRec = win.SpeechRecognition ?? win.webkitSpeechRecognition
     if (!SpeechRec) {
       console.warn('Web Speech API not available')
       return
@@ -119,7 +125,7 @@ export function useAgnesVoice() {
     const rec = new SpeechRec()
     rec.continuous = false
     rec.lang = 'en-US'
-    rec.onresult = (e: SpeechRecognitionEvent) => {
+    rec.onresult = (e) => {
       const t = e.results[0][0].transcript
       inputVolRef.current = 0
       runPipeline(t)
