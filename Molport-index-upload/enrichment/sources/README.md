@@ -15,10 +15,37 @@ two new code paths are added for the hackathon demo.
 | `molport_fixtures.py` | Hand-curated envelopes for 4 anchor demo CASes (with verified Molport IDs) | new |
 | `molport_index.py` | Read-only wrapper over the 6M-compound identity index (anti-hallucination + direct-URL skip) | new |
 | `molport_index_build.py` | One-time CLI that builds `db_molport_index.sqlite` from Molport's public SMILES dump | new |
-| `smoke_test_molport.py` | Offline test suite — cache + fixtures + flatten + index (40 assertions) | new |
+| `smoke_test_molport.py` | Offline test suite — cache + fixtures + flatten + index (49 assertions) | new |
 
 No schema change required — `API_Response_Cache` already exists in
 `schema/enriched_schema.sql` with `Source='molport'` documented.
+
+## Output row schema (`flatten_suppliers`)
+
+Every Molport lookup (API, scraper, or fixtures) returns a list of
+supplier-packing rows with this shape:
+
+| Field | Type | Example | Notes |
+|---|---|---|---|
+| `supplier_name` | str | `"Sigma-Aldrich"` | |
+| `price` | float | `42.50` | Package price in `currency` |
+| `currency` | str | `"USD"` | Passed through from Molport; defaults to USD |
+| `price_qty_kg` | float \| None | `0.1` | Normalized to kg for apples-to-apples |
+| `amount_raw` | float | `100` | Pack size in `measure` units |
+| `measure` | str | `"g"` | `g`, `kg`, or free-form |
+| `delivery_days` | int \| None | `3` | Lead time |
+| `purity` | str | `">=98%"` | Free-form from catalogue |
+| `country_origin` | str | `"US"` | ISO-2 |
+| `country_shipping` | str | `"US"` | ISO-2 |
+| `stock_status` | str | `"in_stock"` | One of: `in_stock`, `backorder`, `unknown` |
+| `is_minimum_order` | int | `1` | `1` if this row is the MOQ for its (supplier, catalogue); else `0` |
+| `molport_catalog_id` | str \| None | `"M6-111-835-SA-01"` | Catalog/SKU for traceability |
+| `last_update_date` | str \| None | `"2025-03-14"` | Freshness signal |
+| `price_type` | str | `"retail_proxy"` | Always this — rows aren't quote-grade |
+| `grade_unverified` | int | `1` | Always `1` — downstream should discount these vs. a real RFQ |
+
+The decision layer reads `is_minimum_order` to identify each supplier's
+MOQ without re-sorting, and uses `stock_status` as a reliability signal.
 
 ## Molport identity index (anti-hallucination layer)
 

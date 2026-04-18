@@ -132,6 +132,13 @@ _SELECTORS = {
     "pack_measure": ["[data-measure]", "td.measure", ".pack-measure"],
     "pack_price": ["[data-price]", "td.price", ".pack-price"],
     "pack_delivery": ["[data-delivery]", "td.delivery", ".pack-delivery"],
+    "pack_stock": [
+        "[data-stock]",
+        "[data-availability]",
+        "td.stock",
+        ".pack-stock",
+        ".availability",
+    ],
     "origin_country": ["[data-origin-country]", "td.origin", ".origin-iso"],
     "shipping_country": ["[data-shipping-country]", "td.shipping", ".shipping-iso"],
     "molport_id": [
@@ -505,12 +512,14 @@ class MolportScraper:
                 price_text = _locator_first_text(pack, _SELECTORS["pack_price"])
                 price_val, currency = _parse_price(price_text)
                 delivery = _parse_int(_locator_first_text(pack, _SELECTORS["pack_delivery"]))
+                stock = _locator_first_text(pack, _SELECTORS["pack_stock"])
                 packings.append({
                     "Amount": amount,
                     "Measure": measure,
                     "Price": price_val,
                     "Currency": currency,
                     "Delivery Days": delivery,
+                    "Stock": stock,
                 })
 
             if not packings and supplier_name is None:

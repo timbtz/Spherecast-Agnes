@@ -90,13 +90,23 @@ def test_fixtures_flatten() -> None:
 
     sample = rows[0] if rows else {}
     required_keys = {
-        "supplier_name", "price_usd", "price_qty_kg", "amount_raw", "measure",
-        "delivery_days", "purity", "country_shipping", "country_origin",
+        "supplier_name", "price", "currency", "price_qty_kg", "amount_raw",
+        "measure", "delivery_days", "purity", "country_shipping",
+        "country_origin", "stock_status", "is_minimum_order",
         "price_type", "grade_unverified",
     }
-    assert_(required_keys.issubset(sample.keys()), "row has all Supplier_Commercial-ready keys")
+    missing = required_keys - set(sample.keys())
+    assert_(
+        required_keys.issubset(sample.keys()),
+        f"row has all Supplier_Commercial-ready keys (missing: {missing})",
+    )
     assert_(sample.get("price_type") == "retail_proxy", "row price_type is retail_proxy")
     assert_(sample.get("grade_unverified") == 1, "row grade_unverified is 1")
+    assert_(sample.get("currency") == "USD", f"row currency passed through (got {sample.get('currency')!r})")
+    assert_(
+        sample.get("stock_status") in {"in_stock", "backorder", "unknown"},
+        f"stock_status normalized to known vocab (got {sample.get('stock_status')!r})",
+    )
 
 
 def test_price_qty_kg_normalization() -> None:
@@ -107,6 +117,54 @@ def test_price_qty_kg_normalization() -> None:
     kg_row = next((r for r in rows if r["measure"] == "kg" and r["amount_raw"] == 1), None)
     assert_(g_row is not None and abs(g_row["price_qty_kg"] - 0.5) < 1e-9, "500g → 0.5 kg")
     assert_(kg_row is not None and abs(kg_row["price_qty_kg"] - 1.0) < 1e-9, "1kg → 1.0 kg")
+
+
+def test_is_minimum_order_tagging() -> None:
+    print("\n[3b] is_minimum_order tagging per (supplier, catalogue)")
+    client = MolportClient(db_path=_tmp_db)
+    rows = client.lookup_ingredient({"cas_number": "557-04-0"})
+
+    # Sigma-Aldrich has 3 packings (100g, 500g, 1kg). Smallest is 100g.
+    sigma_rows = [r for r in rows if r["supplier_name"] == "Sigma-Aldrich"]
+    sigma_moq = [r for r in sigma_rows if r.get("is_minimum_order") == 1]
+    assert_(len(sigma_moq) == 1, f"exactly one Sigma row is MOQ (got {len(sigma_moq)})")
+    assert_(
+        sigma_moq and sigma_moq[0]["amount_raw"] == 100 and sigma_moq[0]["measure"] == "g",
+        "Sigma MOQ is the 100g packing (smallest price_qty_kg)",
+    )
+
+    # TCI has only one packing (500g) — must be tagged MOQ.
+    tci_rows = [r for r in rows if r["supplier_name"] == "TCI Chemicals"]
+    assert_(
+        len(tci_rows) == 1 and tci_rows[0].get("is_minimum_order") == 1,
+        "single-packing supplier's only row is MOQ",
+    )
+
+
+def test_stock_status_normalization() -> None:
+    print("\n[3c] stock_status normalization")
+    client = MolportClient(db_path=_tmp_db)
+    rows = client.lookup_ingredient({"cas_number": "557-04-0"})
+    # Sigma's 1kg packing has "Backorder" — scraper/fixture form
+    sigma_1kg = next(
+        (r for r in rows if r["supplier_name"] == "Sigma-Aldrich"
+         and r["measure"] == "kg" and r["amount_raw"] == 1),
+        None,
+    )
+    assert_(
+        sigma_1kg is not None and sigma_1kg["stock_status"] == "backorder",
+        f"'Backorder' → 'backorder' (got {sigma_1kg and sigma_1kg.get('stock_status')!r})",
+    )
+    # Sigma's 100g has "In Stock"
+    sigma_100g = next(
+        (r for r in rows if r["supplier_name"] == "Sigma-Aldrich"
+         and r["measure"] == "g" and r["amount_raw"] == 100),
+        None,
+    )
+    assert_(
+        sigma_100g is not None and sigma_100g["stock_status"] == "in_stock",
+        f"'In Stock' → 'in_stock' (got {sigma_100g and sigma_100g.get('stock_status')!r})",
+    )
 
 
 def test_unknown_cas_returns_empty() -> None:
@@ -197,6 +255,8 @@ if __name__ == "__main__":
     test_cache_roundtrip()
     test_fixtures_flatten()
     test_price_qty_kg_normalization()
+    test_is_minimum_order_tagging()
+    test_stock_status_normalization()
     test_unknown_cas_returns_empty()
     test_cache_key_is_normalized()
     test_all_fixtures_are_valid_envelopes()

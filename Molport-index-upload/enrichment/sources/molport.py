@@ -197,6 +197,18 @@ class MolportClient:
         FIELD NAMES ARE TITLE CASE WITH SPACES — Molport's API convention.
         Validate these against real responses once an API key is obtained or
         the scraper's first live run has verified selectors.
+
+        Output row fields:
+            supplier_name, price, currency, price_qty_kg, amount_raw, measure,
+            delivery_days, molport_catalog_id, last_update_date, purity,
+            country_shipping, country_origin, stock_status, is_minimum_order,
+            price_type, grade_unverified
+
+        Post-processing step: for each (supplier_name, molport_catalog_id)
+        group, the row with the smallest computable `price_qty_kg` is tagged
+        `is_minimum_order=1` — that's the smallest pack size the supplier
+        will sell, i.e., the MOQ. Rows where `price_qty_kg` can't be derived
+        (unknown measure) stay `is_minimum_order=0`.
         """
         rows = []
         for supplier in molecule_data.get("Suppliers", []):
@@ -204,7 +216,8 @@ class MolportClient:
                 for packing in catalogue.get("Packings", []):
                     amount_raw = packing.get("Amount")
                     measure = packing.get("Measure")
-                    price_usd = packing.get("Price")
+                    price = packing.get("Price")
+                    currency = packing.get("Currency") or "USD"
                     # Normalize amount to KG for Price_Qty_KG
                     price_qty_kg = None
                     if amount_raw is not None and measure:
@@ -213,9 +226,14 @@ class MolportClient:
                             price_qty_kg = float(amount_raw)
                         elif measure_lower in ("g", "gram", "grams"):
                             price_qty_kg = float(amount_raw) / 1000
+                    # Stock status — normalize free-form strings to a small
+                    # vocabulary the decision layer can reason over.
+                    raw_stock = packing.get("Stock") or packing.get("Availability")
+                    stock_status = _normalize_stock(raw_stock)
                     rows.append({
                         "supplier_name": supplier.get("Supplier Name"),
-                        "price_usd": price_usd,
+                        "price": price,
+                        "currency": currency,
                         "price_qty_kg": price_qty_kg,
                         "amount_raw": amount_raw,
                         "measure": measure,
@@ -225,7 +243,45 @@ class MolportClient:
                         "purity": catalogue.get("Purity"),
                         "country_shipping": supplier.get("Shipping Country ISO"),
                         "country_origin": supplier.get("Origin Country ISO"),
+                        "stock_status": stock_status,
+                        "is_minimum_order": 0,  # patched by _tag_minimum_order
                         "price_type": "retail_proxy",
                         "grade_unverified": 1,
                     })
+
+        # Tag the MOQ row per (supplier, catalogue). Smallest computable
+        # price_qty_kg wins; ties broken by first-seen. Rows with no
+        # price_qty_kg are never tagged (we can't prove they're the min).
+        _tag_minimum_order(rows)
         return rows
+
+
+def _normalize_stock(raw: object) -> str:
+    """Map free-form stock strings to {in_stock, backorder, unknown}."""
+    if raw is None:
+        return "unknown"
+    s = str(raw).strip().lower()
+    if not s:
+        return "unknown"
+    if any(t in s for t in ("in stock", "in_stock", "available", "ships")):
+        return "in_stock"
+    if any(t in s for t in ("backorder", "back order", "out of stock", "unavailable", "weeks", "week")):
+        return "backorder"
+    return "unknown"
+
+
+def _tag_minimum_order(rows: list[dict]) -> None:
+    """Mutate `rows` in-place: set `is_minimum_order=1` on the smallest
+    `price_qty_kg` row per (supplier_name, molport_catalog_id) group.
+    """
+    groups: dict[tuple, list[int]] = {}
+    for i, r in enumerate(rows):
+        if r.get("price_qty_kg") is None:
+            continue
+        key = (r.get("supplier_name"), r.get("molport_catalog_id"))
+        groups.setdefault(key, []).append(i)
+    for idxs in groups.values():
+        if not idxs:
+            continue
+        min_i = min(idxs, key=lambda i: rows[i]["price_qty_kg"])
+        rows[min_i]["is_minimum_order"] = 1

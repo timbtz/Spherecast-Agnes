@@ -38,10 +38,11 @@ FIXTURES_BY_CAS: dict[str, dict] = {
                     "Shipping Country ISO": "US",
                     "Catalogue": [{
                         "Purity": ">=95%",
+                        "Catalog Id": "M6-111-835-SA-01",
                         "Packings": [
-                            {"Amount": 100, "Measure": "g", "Price": 42.50, "Currency": "USD", "Delivery Days": 3},
-                            {"Amount": 500, "Measure": "g", "Price": 148.00, "Currency": "USD", "Delivery Days": 3},
-                            {"Amount": 1, "Measure": "kg", "Price": 265.00, "Currency": "USD", "Delivery Days": 5},
+                            {"Amount": 100, "Measure": "g", "Price": 42.50, "Currency": "USD", "Delivery Days": 3, "Stock": "In Stock"},
+                            {"Amount": 500, "Measure": "g", "Price": 148.00, "Currency": "USD", "Delivery Days": 3, "Stock": "In Stock"},
+                            {"Amount": 1, "Measure": "kg", "Price": 265.00, "Currency": "USD", "Delivery Days": 5, "Stock": "Backorder"},
                         ],
                     }],
                 },
@@ -51,8 +52,9 @@ FIXTURES_BY_CAS: dict[str, dict] = {
                     "Shipping Country ISO": "US",
                     "Catalogue": [{
                         "Purity": ">98%",
+                        "Catalog Id": "M6-111-835-TCI-01",
                         "Packings": [
-                            {"Amount": 500, "Measure": "g", "Price": 165.00, "Currency": "USD", "Delivery Days": 7},
+                            {"Amount": 500, "Measure": "g", "Price": 165.00, "Currency": "USD", "Delivery Days": 7, "Stock": "In Stock"},
                         ],
                     }],
                 },
@@ -74,9 +76,10 @@ FIXTURES_BY_CAS: dict[str, dict] = {
                     "Shipping Country ISO": "US",
                     "Catalogue": [{
                         "Purity": ">=98.5%",
+                        "Catalog Id": "M2-317-291-SA-01",
                         "Packings": [
-                            {"Amount": 250, "Measure": "g", "Price": 28.00, "Currency": "USD", "Delivery Days": 3},
-                            {"Amount": 1, "Measure": "kg", "Price": 85.00, "Currency": "USD", "Delivery Days": 3},
+                            {"Amount": 250, "Measure": "g", "Price": 28.00, "Currency": "USD", "Delivery Days": 3, "Stock": "In Stock"},
+                            {"Amount": 1, "Measure": "kg", "Price": 85.00, "Currency": "USD", "Delivery Days": 3, "Stock": "In Stock"},
                         ],
                     }],
                 },
@@ -86,8 +89,9 @@ FIXTURES_BY_CAS: dict[str, dict] = {
                     "Shipping Country ISO": "US",
                     "Catalogue": [{
                         "Purity": ">97%",
+                        "Catalog Id": "M2-317-291-AA-01",
                         "Packings": [
-                            {"Amount": 500, "Measure": "g", "Price": 55.00, "Currency": "USD", "Delivery Days": 5},
+                            {"Amount": 500, "Measure": "g", "Price": 55.00, "Currency": "USD", "Delivery Days": 5, "Stock": "In Stock"},
                         ],
                     }],
                 },
@@ -114,9 +118,10 @@ FIXTURES_BY_CAS: dict[str, dict] = {
                     "Shipping Country ISO": "US",
                     "Catalogue": [{
                         "Purity": "food-grade",
+                        "Catalog Id": "M7-901-114-SA-01",
                         "Packings": [
-                            {"Amount": 500, "Measure": "g", "Price": 78.00, "Currency": "USD", "Delivery Days": 5},
-                            {"Amount": 1, "Measure": "kg", "Price": 132.00, "Currency": "USD", "Delivery Days": 5},
+                            {"Amount": 500, "Measure": "g", "Price": 78.00, "Currency": "USD", "Delivery Days": 5, "Stock": "In Stock"},
+                            {"Amount": 1, "Measure": "kg", "Price": 132.00, "Currency": "USD", "Delivery Days": 5, "Stock": "In Stock"},
                         ],
                     }],
                 },
@@ -138,8 +143,9 @@ FIXTURES_BY_CAS: dict[str, dict] = {
                     "Shipping Country ISO": "US",
                     "Catalogue": [{
                         "Purity": "USP",
+                        "Catalog Id": "M1-792-501-DSM-01",
                         "Packings": [
-                            {"Amount": 1, "Measure": "kg", "Price": 18.50, "Currency": "USD", "Delivery Days": 10},
+                            {"Amount": 1, "Measure": "kg", "Price": 18.50, "Currency": "USD", "Delivery Days": 10, "Stock": "In Stock"},
                         ],
                     }],
                 },
@@ -149,8 +155,9 @@ FIXTURES_BY_CAS: dict[str, dict] = {
                     "Shipping Country ISO": "US",
                     "Catalogue": [{
                         "Purity": "USP/EP",
+                        "Catalog Id": "M1-792-501-CSPC-01",
                         "Packings": [
-                            {"Amount": 1, "Measure": "kg", "Price": 12.80, "Currency": "USD", "Delivery Days": 21},
+                            {"Amount": 1, "Measure": "kg", "Price": 12.80, "Currency": "USD", "Delivery Days": 21, "Stock": "In Stock"},
                         ],
                     }],
                 },

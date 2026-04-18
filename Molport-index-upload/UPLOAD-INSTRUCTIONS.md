@@ -15,13 +15,13 @@ Molport-index-upload/
 │   └── sources/                              ← upload entire folder
 │       ├── __init__.py
 │       ├── README.md                          (updated — adds index docs)
-│       ├── molport.py                         (3-path: API | scraper | fixtures)
+│       ├── molport.py                         (3-path + new fields: currency, stock_status, is_minimum_order)
 │       ├── molport_cache.py
-│       ├── molport_fixtures.py                (updated — real Molport IDs baked in)
+│       ├── molport_fixtures.py                (real Molport IDs + Stock + Catalog Id baked in)
 │       ├── molport_index.py                   (NEW — 6M-row identity index wrapper)
 │       ├── molport_index_build.py             (NEW — one-time builder CLI)
-│       ├── molport_scraper.py                 (updated — index-aware pre/post-flight)
-│       └── smoke_test_molport.py              (extended — 42 assertions)
+│       ├── molport_scraper.py                 (index-aware + pack_stock selector)
+│       └── smoke_test_molport.py              (extended — 49 assertions)
 └── scripts/
     └── download_index.py                      (NEW — fetches DB from Release asset)
 ```
@@ -62,15 +62,18 @@ Confirm the branch selector in the top-left says **Clean-4** (not
 6. Scroll down. Commit message:
 
    ```
-   feat: Molport identity index + anti-hallucination layer
+   feat: Molport identity index + richer supplier rows
 
    - Adds enrichment/sources/molport_index.py (6M-row SQLite wrapper)
    - Adds enrichment/sources/molport_index_build.py (one-time builder)
    - Adds scripts/download_index.py (fetches index from Release asset)
-   - Updates molport_scraper.py with pre-flight + post-flight identity checks
+   - Updates molport_scraper.py: pre/post-flight identity checks + stock selector
    - Patches molport_fixtures.py with 3 verified real Molport IDs
      (Molport-006-111-835, Molport-002-317-291, Molport-001-792-501)
-   - Extends smoke test to 42 assertions (all passing)
+   - Expands supplier-row schema: currency, stock_status (in_stock/backorder/
+     unknown), is_minimum_order (tagged per supplier-catalogue)
+   - Renames price_usd → price (currency now explicit)
+   - Extends smoke test to 49 assertions (all passing)
    - .gitignore excludes db_molport_index.sqlite (1.65 GB, hosted as Release asset)
    ```
 
