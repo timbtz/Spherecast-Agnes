@@ -1,5 +1,12 @@
 # Agnes — Python dependencies
 
+# Orchestration API
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.7.0
+pyyaml>=6.0.1
+httpx>=0.27.0
+
 # Claude API
 anthropic>=0.40.0
 

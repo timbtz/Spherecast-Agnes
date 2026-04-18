@@ -1,0 +1,27 @@
+name: substitution_discovery
+trigger: chat
+# US-07: Find functionally equivalent substitutes for an ingredient.
+# Walks substitution graph, checks compliance, assesses BOM impact, drafts proposal.
+nodes:
+  - id: find-substitutes
+    tool_class: SubstitutionWalkerTool
+    depends_on: []
+
+  - id: find-alternatives
+    tool_class: SupplierAlternativesTool
+    depends_on: [find-substitutes]
+    when: has_substitutes
+
+  - id: bom-impact
+    tool_class: BomImpactTool
+    depends_on: [find-substitutes]
+
+  - id: benchmark-prices
+    tool_class: PriceBenchmarkTool
+    depends_on: [find-substitutes]
+    when: has_substitutes
+
+  - id: write-proposal
+    agent_class: ProposalWriter
+    depends_on: [find-alternatives, bom-impact, benchmark-prices]
+    when: has_substitutes

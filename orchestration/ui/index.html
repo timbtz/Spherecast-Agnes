@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Agnes — Pipeline Monitor</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: #0f1117; color: #e2e8f0; }
+  header { padding: 16px 24px; border-bottom: 1px solid #2d3748; display: flex; align-items: center; gap: 12px; }
+  header h1 { font-size: 18px; font-weight: 600; }
+  .layout { display: grid; grid-template-columns: 280px 1fr; height: calc(100vh - 57px); }
+  .sidebar { border-right: 1px solid #2d3748; overflow-y: auto; }
+  .run-item { padding: 12px 16px; border-bottom: 1px solid #1a202c; cursor: pointer; }
+  .run-item:hover { background: #1a202c; }
+  .run-item.active { background: #1a365d; }
+  .run-meta { font-size: 11px; color: #718096; margin-top: 4px; }
+  .status-badge { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; margin-left: 6px; }
+  .s-completed { background: #22543d; color: #9ae6b4; }
+  .s-running { background: #1a365d; color: #90cdf4; }
+  .s-failed { background: #742a2a; color: #feb2b2; }
+  .s-pending { background: #2d3748; color: #a0aec0; }
+  .canvas { padding: 24px; overflow: auto; }
+  .pipeline-name { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+  .pipeline-meta { font-size: 12px; color: #718096; margin-bottom: 24px; }
+  .dag { display: flex; gap: 32px; align-items: flex-start; }
+  .layer { display: flex; flex-direction: column; gap: 12px; position: relative; }
+  .layer::after { content: '→'; position: absolute; right: -22px; top: 50%; transform: translateY(-50%); color: #4a5568; font-size: 18px; }
+  .layer:last-child::after { display: none; }
+  .node { min-width: 160px; padding: 12px 14px; border-radius: 8px; border: 2px solid #2d3748; background: #1a202c; transition: all 0.3s; }
+  .node.pending { border-color: #2d3748; }
+  .node.started { border-color: #3182ce; background: #1a365d; animation: pulse 1.5s infinite; }
+  .node.completed { border-color: #38a169; background: #1c4532; }
+  .node.failed { border-color: #e53e3e; background: #742a2a; }
+  .node.skipped { border-color: #d69e2e; background: #5f370e; opacity: 0.7; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.7; } }
+  .node-id { font-size: 13px; font-weight: 600; }
+  .node-class { font-size: 10px; color: #718096; margin-top: 3px; }
+  .node-type { font-size: 9px; padding: 1px 5px; border-radius: 3px; display: inline-block; margin-top: 4px; }
+  .type-tool { background: #2c5282; color: #90cdf4; }
+  .type-agent { background: #553c9a; color: #d6bcfa; }
+  .node-elapsed { font-size: 10px; color: #68d391; margin-top: 6px; }
+  .node-when { font-size: 10px; color: #f6ad55; margin-top: 3px; }
+  .log { margin-top: 24px; background: #1a202c; border-radius: 8px; padding: 12px; max-height: 200px; overflow-y: auto; }
+  .log-entry { font-size: 11px; font-family: monospace; padding: 3px 0; color: #a0aec0; border-bottom: 1px solid #2d3748; }
+  .log-entry.ev-node_completed { color: #68d391; }
+  .log-entry.ev-node_failed { color: #fc8181; }
+  .log-entry.ev-node_started { color: #90cdf4; }
+  .log-entry.ev-node_skipped { color: #f6ad55; }
+  .empty { color: #4a5568; font-size: 14px; padding: 40px; text-align: center; }
+  #trigger-form { display: flex; gap: 8px; margin-bottom: 24px; }
+  #trigger-form select, #trigger-form input { background: #2d3748; border: 1px solid #4a5568; color: #e2e8f0; padding: 6px 10px; border-radius: 6px; font-size: 13px; }
+  #trigger-form button { background: #3182ce; color: white; border: none; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  #trigger-form button:hover { background: #2b6cb0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Agnes — Pipeline Monitor</h1>
+  <span id="conn-status" style="font-size:12px;color:#718096;">●</span>
+</header>
+<div class="layout">
+  <div class="sidebar" id="runs-list"><div class="empty">Loading runs…</div></div>
+  <div class="canvas" id="canvas">
+    <div id="trigger-form">
+      <select id="pipeline-select"><option value="">Select pipeline…</option></select>
+      <input id="ingredient-input" placeholder="ingredient_name (optional)" style="width:220px">
+      <button onclick="triggerPipeline()">Run Pipeline</button>
+    </div>
+    <div id="dag-view"><div class="empty">Select a run to visualize its execution graph</div></div>
+    <div id="event-log" style="display:none"><div class="log" id="log-entries"></div></div>
+  </div>
+</div>
+
+<script>
+const API = '';
+let activeRunId = null;
+let activeEventSource = null;
+let nodeStates = {};
+let pipelineGraph = null;
+
+async function loadRuns() {
+  const resp = await fetch(`${API}/runs?limit=30`);
+  const { runs } = await resp.json();
+  const el = document.getElementById('runs-list');
+  if (!runs.length) { el.innerHTML = '<div class="empty">No runs yet</div>'; return; }
+  el.innerHTML = runs.map(r => `
+    <div class="run-item" data-id="${r.id}" data-pipeline="${r.pipeline_name}" onclick="selectRun('${r.id}','${r.pipeline_name}','${r.status}')">
+      <div>${r.pipeline_name} <span class="status-badge s-${r.status}">${r.status}</span></div>
+      <div class="run-meta">${r.id.slice(0,8)}… · ${r.started_at ? new Date(r.started_at).toLocaleTimeString() : ''}</div>
+    </div>`).join('');
+  await loadPipelines();
+}
+
+async function loadPipelines() {
+  const resp = await fetch(`${API}/pipelines`);
+  const { pipelines } = await resp.json();
+  const sel = document.getElementById('pipeline-select');
+  sel.innerHTML = '<option value="">Select pipeline…</option>' + pipelines.map(p => `<option value="${p}">${p}</option>`).join('');
+}
+
+async function selectRun(runId, pipelineName, status) {
+  document.querySelectorAll('.run-item').forEach(el => el.classList.remove('active'));
+  document.querySelector(`[data-id="${runId}"]`)?.classList.add('active');
+  activeRunId = runId;
+  nodeStates = {};
+  document.getElementById('event-log').style.display = 'block';
+  document.getElementById('log-entries').innerHTML = '';
+
+  const gResp = await fetch(`${API}/pipelines/${pipelineName}/graph`);
+  pipelineGraph = await gResp.json();
+  renderDag();
+
+  const rResp = await fetch(`${API}/runs/${runId}`);
+  const runData = await rResp.json();
+  (runData.events || []).forEach(ev => applyEvent(JSON.parse(ev.data || '{}'), ev.event_type, ev.node_id));
+  renderDag();
+
+  if (activeEventSource) activeEventSource.close();
+  if (status === 'running' || status === 'pending') {
+    activeEventSource = new EventSource(`${API}/runs/${runId}/stream`);
+    document.getElementById('conn-status').style.color = '#48bb78';
+    activeEventSource.onmessage = e => {
+      const ev = JSON.parse(e.data);
+      applyEvent(ev, ev.event_type, ev.node_id);
+      renderDag();
+      logEvent(ev);
+      if (ev.event_type === 'stream_closed') { activeEventSource.close(); document.getElementById('conn-status').style.color = '#718096'; loadRuns(); }
+    };
+    activeEventSource.onerror = () => { document.getElementById('conn-status').style.color = '#fc8181'; };
+  }
+}
+
+function applyEvent(data, type, nodeId) {
+  if (!nodeId) return;
+  if (type === 'node_started') nodeStates[nodeId] = { state: 'started' };
+  if (type === 'node_completed') nodeStates[nodeId] = { state: 'completed', elapsed: data.node_output?._elapsed_ms };
+  if (type === 'node_failed') nodeStates[nodeId] = { state: 'failed', error: data.error };
+  if (type === 'node_skipped') nodeStates[nodeId] = { state: 'skipped' };
+}
+
+function renderDag() {
+  if (!pipelineGraph) return;
+  const nodeMap = Object.fromEntries(pipelineGraph.nodes.map(n => [n.id, n]));
+  const html = `
+    <div class="pipeline-name">${pipelineGraph.name}</div>
+    <div class="pipeline-meta">trigger: ${pipelineGraph.trigger} · ${pipelineGraph.nodes.length} nodes</div>
+    <div class="dag">
+      ${pipelineGraph.layers.map(layer => `
+        <div class="layer">
+          ${layer.map(nodeId => {
+            const n = nodeMap[nodeId];
+            const s = nodeStates[nodeId] || { state: 'pending' };
+            return `<div class="node ${s.state}">
+              <div class="node-id">${nodeId}</div>
+              <div class="node-class">${n.class}</div>
+              <span class="node-type type-${n.type}">${n.type}</span>
+              ${n.when ? `<div class="node-when">when: ${n.when}</div>` : ''}
+              ${s.elapsed ? `<div class="node-elapsed">✓ ${s.elapsed}ms</div>` : ''}
+            </div>`;
+          }).join('')}
+        </div>`).join('')}
+    </div>`;
+  document.getElementById('dag-view').innerHTML = html;
+}
+
+function logEvent(ev) {
+  const el = document.getElementById('log-entries');
+  const ts = new Date().toLocaleTimeString();
+  el.innerHTML = `<div class="log-entry ev-${ev.event_type}">[${ts}] ${ev.event_type}${ev.node_id ? ' · ' + ev.node_id : ''}${ev._elapsed_ms ? ' · ' + ev._elapsed_ms + 'ms' : ''}</div>` + el.innerHTML;
+}
+
+async function triggerPipeline() {
+  const pipeline = document.getElementById('pipeline-select').value;
+  if (!pipeline) return alert('Select a pipeline first');
+  const ingredient = document.getElementById('ingredient-input').value.trim();
+  const params = ingredient ? { ingredient_name: ingredient } : {};
+  const resp = await fetch(`${API}/pipelines/run/${pipeline}`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ params })
+  });
+  const { run_id } = await resp.json();
+  await loadRuns();
+  setTimeout(() => selectRun(run_id, pipeline, 'running'), 200);
+}
+
+loadRuns();
+setInterval(loadRuns, 10000);
+</script>
+</body>
+</html>

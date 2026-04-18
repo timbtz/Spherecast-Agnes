@@ -1,0 +1,26 @@
+name: supplier_fallout
+trigger: chat
+# US-01: A supplier can no longer deliver. Find ranked alternatives, gate on compliance,
+# assess BOM impact, draft RFQs, and produce a reactive narrative.
+nodes:
+  - id: find-alternatives
+    tool_class: SupplierAlternativesTool
+    depends_on: []
+
+  - id: gate-qualify
+    tool_class: ComplianceGateTool
+    depends_on: [find-alternatives]
+    when: has_alternatives
+
+  - id: bom-impact
+    tool_class: BomImpactTool
+    depends_on: [find-alternatives]
+
+  - id: format-rfqs
+    tool_class: RfqFormatterTool
+    depends_on: [gate-qualify, bom-impact]
+    when: compliance_feasible
+
+  - id: write-proposal
+    agent_class: ReactiveAgent
+    depends_on: [format-rfqs, bom-impact]

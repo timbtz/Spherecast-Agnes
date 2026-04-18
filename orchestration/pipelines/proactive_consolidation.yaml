@@ -1,0 +1,13 @@
+name: proactive_consolidation
+trigger: data_update
+# US-02: Proactive weekly/on-data-change consolidation scan.
+# Ranks opportunities, maps BOM impact, generates executive proposals.
+nodes:
+  - id: scan-opportunities
+    tool_class: OpportunityRankerTool
+    depends_on: []
+
+  - id: write-proposals
+    agent_class: ProactiveAgent
+    depends_on: [scan-opportunities]
+    when: above_score_threshold

@@ -47,14 +47,8 @@ Agnes/
 │   │   ├── claude-api-patterns-guide.md
 │   │   ├── browser-automation-guide.md
 │   │   └── ...                 # One guide per API or tooling concern
-│   ├── Wiki/                   # LLM-maintained reasoning pages (Stage 3+ only)
-│   │   ├── index.md            # All pages with one-line summaries
-│   │   ├── log.md              # Append-only agent action log
-│   │   ├── ingredients/        # Per-canonical-ingredient reasoning pages
-│   │   ├── suppliers/          # Per-supplier profile pages
-│   │   └── proposals/          # Full evidence trail per proposal
 │   └── Data/
-│       ├── llm-wiki.md         # LLM-wiki pattern reference (read if implementing Wiki)
+│       ├── llm-wiki.md         # LLM-wiki pattern (reference only — not on critical path)
 │       └── Spherecast/         # Raw Spherecast business context
 │
 ├── enrichment/                 # Stage 2 — data pipeline (Phases 1–3)
@@ -116,7 +110,7 @@ Agnes/
 
 2. **Stage 3 agents** — none of `orchestration/agents/` exists yet. This is the core work for the hackathon.
 
-3. **Wiki initialization** — `Orchestration/Wiki/` doesn't exist. Initialize `index.md` and `log.md` before Stage 3 agents write to it.
+3. **Agent_Log table** — already in schema. Agents write one row per DAG node; the log is queryable SQLite, not a markdown file.
 
 ---
 
@@ -135,9 +129,9 @@ Agnes/
 
 ### Agent Layer (Stage 3 — Google ADK + Claude)
 - **Google ADK** (`google-adk`) — web search via Gemini 2.5 Flash; handles search + browser tool use
-- **Claude API** (`anthropic`) — reasoning, proposal generation, wiki maintenance
-- **DAG executor** (`orchestration/dag_executor.py` — to build) — structured agent workflows with per-step logging
-- **LLM-wiki** (`Orchestration/Wiki/`) — persistent reasoning layer; agents read/write wiki pages so reasoning compounds across runs
+- **Claude API** (`anthropic`) — reasoning, proposal generation, structured data extraction
+- **DAG executor** (`orchestration/dag_executor.py` — to build) — structured agent workflows with per-step logging to `Agent_Log`
+- **SQLite reasoning layer** — agents query live DB for context and write results back to existing tables; no stale markdown pages
 
 The agent architecture has three types (all in `orchestration/agents/`):
 
@@ -153,7 +147,7 @@ The agent architecture has three types (all in `orchestration/agents/`):
 - **Substitution graph** — `substitution_graph.py`: ingredient equivalence edges for cross-company substitution proposals
 
 ### Frontend (Stage 4 — TBD)
-Flask/FastAPI + HTMX or lightweight React. Reads `db_enriched.sqlite` and `Orchestration/Wiki/` directly. Decision deferred to Stage 4 start.
+Flask/FastAPI + HTMX or lightweight React. Reads `db_enriched.sqlite` directly. Decision deferred to Stage 4 start. The LLM-wiki pattern (`Orchestration/Data/llm-wiki.md`) is available as an optional human-readable export layer at this stage — generate markdown from DB queries rather than maintaining it as a primary store.
 
 ---
 
@@ -195,16 +189,32 @@ Node 3: SearchAlternativeSuppliers(ingredient_list) → candidate_list      [dep
 Node 4: FilterByCertification(candidates, cert_requirements) → filtered   [depends: 2,3]
 Node 5: RankByScore(filtered) → ranked_list                               [depends: 4]
 Node 6: GenerateProposal(ranked_list) → proposal_text                     [depends: 5]
-Node 7: UpdateWiki(proposal_text) → wiki_updated                          [depends: 6]
+Node 7: WriteToDatabase(proposal_text) → Consolidation_Opportunity row updated  [depends: 6]
 ```
 
-Each node logs to `Orchestration/Wiki/log.md`. The user can inspect exactly which step produced which conclusion.
+Each node writes one row to `Agent_Log` (Run_Id, Agent, Node, Status, Input_JSON, Output_JSON). Query the log with SQL to audit any step.
 
-### LLM-Wiki Pattern
+### SQLite Reasoning Pattern
 
-The `Orchestration/Wiki/` directory is the persistent reasoning layer (the data layer is the database). Before an agent reasons about a decision, it reads the relevant wiki page. After making a decision, it updates the wiki page. This means reasoning compounds — the second agent run on Vitamin D3 starts from a rich context page, not from scratch.
+`db_enriched.sqlite` is the persistent reasoning layer. Before an agent reasons about a decision, it queries the DB for live context — no stale pages, no re-sync overhead. After making a decision, it writes results back into existing tables (`Proposal_Text`, `Score_LLM_Adjustment`, `Supplier_Commercial`, etc.) and logs the run to `Agent_Log`.
 
-See [`Orchestration/Data/llm-wiki.md`](Orchestration/Data/llm-wiki.md) for the full pattern description.
+**Context query example (Vitamin C opportunity):**
+```sql
+SELECT ic.Name, ic.SMILES, ic.Grade_Flag, ic.UNII_Code,
+       co.Consolidation_Score, co.Company_Count, co.Proposal_Text,
+       GROUP_CONCAT(pc.Certification) AS Certs
+FROM Ingredient_Canonical ic
+JOIN Consolidation_Opportunity co ON co.CanonicalIngredientId = ic.Id
+LEFT JOIN Product_Compliance pc ON pc.ProductId IN (
+    SELECT s.ProductId FROM SKU_To_Canonical s WHERE s.CanonicalId = ic.Id
+)
+WHERE ic.Name = 'Vitamin C'
+GROUP BY ic.Id;
+```
+
+This is always current, composable, and requires no wiki-page maintenance. Reasoning compounds because every agent run enriches the same tables the next run queries.
+
+The LLM-wiki pattern (`Orchestration/Data/llm-wiki.md`) is available as an *optional Stage 4 output format* — generate human-readable markdown from DB queries for stakeholder review, not as a primary store.
 
 ### Agent Function Stack (to build)
 
@@ -216,20 +226,23 @@ search_web(query: str) -> list[SearchResult]          # Google ADK
 scrape_supplier_page(url: str) -> SupplierRecord      # Playwright browser agent
 extract_structured_data(html: str, schema) -> dict    # Claude API
 
+# DB context functions — agents build prompts from live queries, not static pages
+query_ingredient_context(canonical_id: int) -> dict   # Ingredient_Canonical + Consolidation_Opportunity
+query_compliance_requirements(ingredient_ids: list) -> list[dict]  # Product_Compliance
+query_substitution_edges(canonical_id: int) -> list[dict]          # Ingredient_Substitution
+
 # Supply chain evaluation
-evaluate_supply_route(ingredient_id, supplier_id) -> RouteEvaluation
 find_alternative_suppliers(ingredient_id) -> list[SupplierCandidate]
 evaluate_compliance_fit(supplier, required_certs) -> ComplianceDelta
 score_consolidation_opportunity(canonical_id) -> float
 
-# Proposal generation
-generate_proposal(opportunity_id) -> ProposalText
-rank_proposals(opportunities: list) -> list[RankedProposal]
+# Proposal generation + DB writes
+generate_proposal(opportunity_id) -> ProposalText     # writes to Consolidation_Opportunity
+upsert_supplier_commercial(supplier_id, canonical_id, data) -> None
 
-# Wiki maintenance
-read_wiki_page(path: str) -> str
-write_wiki_page(path: str, content: str)
-append_log(entry: str)
+# Agent logging
+log_agent_step(run_id, agent, node, status, input_json, output_json, **fk_ids)
+    # → INSERT INTO Agent_Log; one call per DAG node
 ```
 
 These should be implemented as:
@@ -323,15 +336,15 @@ The `Product_Compliance` table also has a `Caveats` column (schema v1.1) for add
 1. Add the agent file to `orchestration/agents/<name>_agent.py`
 2. Define its DAG as a list of nodes (see meta-workflow.md §3 for the pattern)
 3. Register its MCP tools or tool_use schemas
-4. Initialize the corresponding wiki page(s) in `Orchestration/Wiki/`
-5. Document the trigger, inputs, outputs, and wiki pages it reads/writes
+4. Document the trigger, inputs, DB tables it reads, and DB tables it writes
+5. Every DAG node must call `log_agent_step()` → one `Agent_Log` row per step
 
 ### Open decisions (need resolution before implementing)
 
 | Decision | Options | Status |
 |---|---|---|
 | Frontend framework | Flask+HTMX vs. lightweight React | Open — decide at Stage 4 start |
-| Wiki storage | Plain markdown files vs. SQLite-backed | Open — markdown is the working assumption |
+| Reasoning persistence | SQLite vs. markdown wiki | **Closed — SQLite** (`Agent_Log` + existing tables) |
 | DAG executor library | Custom vs. `prefect`-lite vs. `dagster` | Open — custom is simplest for MVP |
 | MCP tool interface | Google ADK tool use vs. Claude tool_use | Open — depends on primary agent LLM |
 
@@ -342,8 +355,8 @@ The `Product_Compliance` table also has a `Caveats` column (schema v1.1) for add
 1. [`Orchestration/PRDs/meta-workflow.md`](Orchestration/PRDs/meta-workflow.md) — four-stage implementation plan, agent architecture, open decisions
 2. [`CLAUDE.md`](CLAUDE.md) — live current state: what's run, what's broken, what's blocked
 3. [`schema/enriched_schema.sql`](schema/enriched_schema.sql) — locked v1.1 schema; understand this before writing any SQL
-4. [`Orchestration/Data/llm-wiki.md`](Orchestration/Data/llm-wiki.md) — the wiki pattern that Stage 3 reasoning is built on
-5. [`Orchestration/References/google-adk-search-guide.md`](Orchestration/References/google-adk-search-guide.md) — how to use Google ADK for web search in agents
+4. [`Orchestration/References/google-adk-search-guide.md`](Orchestration/References/google-adk-search-guide.md) — how to use Google ADK for web search in agents
+5. [`Orchestration/References/claude-api-patterns-guide.md`](Orchestration/References/claude-api-patterns-guide.md) — Claude tool_use patterns for structured DB writes
 
 ---
 

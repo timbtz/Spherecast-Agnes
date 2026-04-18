@@ -4,6 +4,32 @@
 
 ---
 
+## Voice / UI Layer (Planned)
+
+| Component | Status | Notes |
+|---|---|---|
+| `REF-ELEVENLABS-ORB-UI.md` | ✅ Reference written | ElevenLabs WebGL Orb component — props, patterns, color palettes per pipeline |
+| `REF-ELEVENLABS-VOICE-PIPELINE-INTEGRATION.md` | ✅ Reference written | Full integration guide: STT→/chat→SSE→TTS, Orb state machine, Option 1 (custom) + Option 2 (Conversational AI agent) |
+| `orchestration/ui/voice/` | ⏳ Not built | Recommended: Vite+React page; Orb + useAgnesVoice hook; served at `/voice` from FastAPI |
+
+---
+
+## Orchestration Layer (NEW)
+
+| Component | Status | Notes |
+|---|---|---|
+| `orchestration/api/main.py` | ✅ Live | FastAPI; start: `PYTHONPATH=. uvicorn orchestration.api.main:app --reload --port 8000` |
+| `orchestration/api/dag_executor.py` | ✅ Complete | Topological layers, asyncio.gather(), `orchestration.db` event log, SSE publish |
+| `orchestration/api/pipeline_loader.py` | ✅ Complete | YAML → Pipeline/PipelineNode dataclasses; 5 pipelines loaded |
+| `orchestration/api/conditions.py` | ✅ Complete | 6 named condition guards for YAML `when:` clauses |
+| `orchestration/agents/router_agent.py` | ✅ Complete | Claude-Haiku chat classifier → pipeline name + params JSON |
+| `orchestration/agents/{reactive,proactive,research,proposal_writer}` | ✅ Complete | All Claude-based; ADK/Gemini path in search_sub_agent.py (needs Gemini API enabled) |
+| `orchestration/tools/` | ✅ Complete | 7 deterministic tools (no LLM): supplier_alternatives, compliance_gate, substitution_walker, bom_impact, price_benchmark, opportunity_ranker, rfq_formatter |
+| `orchestration/pipelines/` | ✅ 5 pipelines | supplier_fallout, proactive_consolidation, new_ingredient_research, substitution_discovery, price_audit |
+| **Endpoints** | ✅ 8 endpoints | POST /chat, POST /pipelines/run/{name}, GET /pipelines, GET /runs, GET /runs/{id}, GET /runs/{id}/stream (SSE), GET /proposals, POST /data-update |
+
+---
+
 ## Current State
 
 | Layer | Status | Notes |

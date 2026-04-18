@@ -177,6 +177,26 @@ CREATE TABLE IF NOT EXISTS Ingredient_Substitution_Rule (
     Source          TEXT    NOT NULL DEFAULT 'curated'
 );
 
+-- Agent action log: append-only record of every agent step across all runs.
+-- Replaces a markdown log file — queryable, structured, idempotent.
+-- Agents write one row per DAG node execution; humans and agents query for context.
+CREATE TABLE IF NOT EXISTS Agent_Log (
+    Id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    Run_Id          TEXT    NOT NULL,                -- UUID shared by all steps in one agent run
+    Agent           TEXT    NOT NULL,                -- reactive|proactive|research|proposal
+    Node            TEXT    NOT NULL,                -- DAG node name, e.g. "QueryAffectedIngredients"
+    Status          TEXT    NOT NULL,                -- success|skipped|error
+    Input_JSON      TEXT,                            -- JSON snapshot of node inputs
+    Output_JSON     TEXT,                            -- JSON snapshot of node outputs (or error detail)
+    Related_IngredientId INTEGER,                    -- FK to Ingredient_Canonical when applicable
+    Related_SupplierId   INTEGER,                    -- FK to Supplier when applicable
+    Related_OpportunityId INTEGER,                   -- FK to Consolidation_Opportunity when applicable
+    Logged_At       TEXT    NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (Related_IngredientId)    REFERENCES Ingredient_Canonical(Id),
+    FOREIGN KEY (Related_SupplierId)      REFERENCES Supplier(Id),
+    FOREIGN KEY (Related_OpportunityId)   REFERENCES Consolidation_Opportunity(Id)
+);
+
 -- Certification registry: stores scraped NSF/USP/InformedSport databases locally
 CREATE TABLE IF NOT EXISTS Certification_Registry (
     Id              INTEGER PRIMARY KEY AUTOINCREMENT,
