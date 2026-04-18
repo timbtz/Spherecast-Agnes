@@ -72,7 +72,8 @@ class SupplierWebEnricher:
         existing = conn.execute("SELECT Id FROM Supplier WHERE Name = ?", (supplier_name,)).fetchone()
         if existing:
             return existing[0]
-        cur = conn.execute("INSERT OR IGNORE INTO Supplier (Name, Country) VALUES (?, ?)", (supplier_name, country))
+        # Supplier table is (Id, Name) — country goes onto Supplier_Commercial.Country_Origin
+        cur = conn.execute("INSERT OR IGNORE INTO Supplier (Name) VALUES (?)", (supplier_name,))
         sid = cur.lastrowid or conn.execute("SELECT Id FROM Supplier WHERE Name = ?", (supplier_name,)).fetchone()[0]
         return sid
 

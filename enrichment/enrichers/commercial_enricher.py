@@ -74,9 +74,10 @@ class CommercialEnricher:
             if existing:
                 molport_supplier_id = existing[0]
             else:
+                # Supplier table schema is (Id, Name) — country lives on Supplier_Commercial
                 cur = conn.execute(
-                    "INSERT OR IGNORE INTO Supplier (Name, Country) VALUES (?, ?)",
-                    (supplier_name, row.get("country_origin"))
+                    "INSERT OR IGNORE INTO Supplier (Name) VALUES (?)",
+                    (supplier_name,)
                 )
                 molport_supplier_id = cur.lastrowid or conn.execute(
                     "SELECT Id FROM Supplier WHERE Name = ?", (supplier_name,)
