@@ -1,0 +1,34 @@
+# Agnes — Python dependencies
+
+# Claude API
+anthropic>=0.40.0
+
+# Google ADK (Gemini-based web search)
+google-genai>=1.0.0
+google-adk>=0.5.0
+
+# HTTP
+requests>=2.31.0
+
+# PubChem Python client
+pubchempy>=1.0.4
+
+# Fuzzy matching
+rapidfuzz>=3.6.0
+
+# Semantic similarity (optional — used if rapidfuzz confidence < threshold)
+sentence-transformers>=2.7.0
+
+# Browser automation
+playwright>=1.44.0
+# After install, run: playwright install chromium
+
+# HTML parsing
+beautifulsoup4>=4.12.0
+lxml>=5.2.0
+
+# PDF extraction
+pdfplumber>=0.11.0
+
+# Environment variables
+python-dotenv>=1.0.0
