@@ -6,17 +6,23 @@ _AGENT_REGISTRY: dict[str, str] = {
     "ProactiveAgent":    "orchestration.agents.proactive_agent:run",
     "ResearchAgent":     "orchestration.agents.research_agent:run",
     "ProposalWriter":    "orchestration.agents.proposal_writer:run",
+    "PriceFetchAgent":            "orchestration.agents.price_fetch_agent:run",
+    "PriceAlertWriter":           "orchestration.agents.price_alert_writer:run",
+    "RegulatoryResearchAgent":    "orchestration.agents.regulatory_research_agent:run",
+    "RegulatoryDriftAgent":       "orchestration.agents.regulatory_drift_agent:run",
 }
 
 _TOOL_REGISTRY: dict[str, str] = {
-    "SupplierAlternativesTool":  "orchestration.tools.supplier_alternatives:run",
-    "ComplianceGateTool":        "orchestration.tools.compliance_gate:run",
-    "SubstitutionWalkerTool":    "orchestration.tools.substitution_walker:run",
-    "BomImpactTool":             "orchestration.tools.bom_impact:run",
-    "PriceBenchmarkTool":        "orchestration.tools.price_benchmark:run",
-    "OpportunityRankerTool":     "orchestration.tools.opportunity_ranker:run",
-    "RfqFormatterTool":          "orchestration.tools.rfq_formatter:run",
-    "ComplianceReasonerTool":    "orchestration.tools.compliance_reasoner_tool:run",
+    "SupplierAlternativesTool":   "orchestration.tools.supplier_alternatives:run",
+    "ComplianceGateTool":         "orchestration.tools.compliance_gate:run",
+    "SubstitutionWalkerTool":     "orchestration.tools.substitution_walker:run",
+    "BomImpactTool":              "orchestration.tools.bom_impact:run",
+    "PriceBenchmarkTool":         "orchestration.tools.price_benchmark:run",
+    "OpportunityRankerTool":      "orchestration.tools.opportunity_ranker:run",
+    "RfqFormatterTool":           "orchestration.tools.rfq_formatter:run",
+    "ComplianceReasonerTool":     "orchestration.tools.compliance_reasoner_tool:run",
+    "PriceStalenesCheckerTool":   "orchestration.tools.price_staleness_checker:run",
+    "RegulatoryDriftTool":        "orchestration.tools.regulatory_drift_tool:run",
 }
 
 

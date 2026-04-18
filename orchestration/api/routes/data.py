@@ -22,26 +22,30 @@ def get_db():
 def opportunities():
     with get_db() as db:
         rows = db.execute("""
-            SELECT co.Id as id, ic.Name as ingredient, ic.UNII_Code as unii,
-                   ic.Grade_Flag as grade_flag, co.Company_Count as company_count,
-                   co.Consolidation_Score as score,
-                   co.Score_Formula_Component as score_formula_component,
+            SELECT co.Id as id, ic.Id as ingredient_id, ic.Name as ingredient_name,
+                   ic.UNII_Code as unii, ic.Grade_Flag as grade,
+                   co.Company_Count as company_count,
+                   co.Consolidation_Score as consolidation_score,
                    co.Compliance_Feasible as compliance_feasible,
                    co.Proposal_Text as proposal_text
             FROM Consolidation_Opportunity co
             JOIN Ingredient_Canonical ic ON ic.Id = co.CanonicalIngredientId
             ORDER BY co.Consolidation_Score DESC
         """).fetchall()
-    return {"opportunities": [dict(r) for r in rows], "count": len(rows)}
+    return [
+        {**dict(r), "id": str(r["id"]), "ingredient_id": str(r["ingredient_id"]),
+         "compliance_feasible": bool(r["compliance_feasible"])}
+        for r in rows
+    ]
 
 
 @router.get("/ingredients")
 def ingredients(grade: str | None = Query(default=None)):
     with get_db() as db:
         query = """
-            SELECT ic.Id as id, ic.Name as display_name, ic.UNII_Code as unii_code,
-                   ic.CAS_Number as cas_number, ic.PubChem_CID as pubchem_cid,
-                   ic.SMILES as smiles, ic.Grade_Flag as grade_flag,
+            SELECT ic.Id as id, ic.Name as display_name, ic.UNII_Code as unii,
+                   ic.CAS_Number as cas, ic.PubChem_CID as pubchem_cid,
+                   ic.SMILES as smiles, ic.Grade_Flag as grade,
                    ic.Confidence as match_score,
                    COUNT(DISTINCT CASE WHEN s.IngredientAId = ic.Id THEN s.IngredientBId END) +
                    COUNT(DISTINCT CASE WHEN s.IngredientBId = ic.Id THEN s.IngredientAId END) as substitution_edges
@@ -54,7 +58,7 @@ def ingredients(grade: str | None = Query(default=None)):
             params.append(grade)
         query += " GROUP BY ic.Id ORDER BY ic.Name"
         rows = db.execute(query, params).fetchall()
-    return {"ingredients": [dict(r) for r in rows]}
+    return [dict(r) for r in rows]
 
 
 @router.get("/compliance")
@@ -93,12 +97,110 @@ def compliance():
 def proposals():
     with get_db() as db:
         rows = db.execute("""
-            SELECT ic.Name as ingredient, co.Company_Count as company_count,
-                   co.Consolidation_Score as score, co.Proposal_Text as proposal_text,
-                   co.Compliance_Feasible as compliance_feasible, ic.Grade_Flag as grade_flag
+            SELECT co.Id as id, ic.Id as ingredient_id, ic.Name as ingredient_name,
+                   co.Company_Count as company_count,
+                   co.Consolidation_Score as consolidation_score,
+                   co.Proposal_Text as proposal_text,
+                   co.Compliance_Feasible as compliance_feasible,
+                   ic.Grade_Flag as grade
             FROM Consolidation_Opportunity co
             JOIN Ingredient_Canonical ic ON ic.Id = co.CanonicalIngredientId
             WHERE co.Proposal_Text IS NOT NULL
             ORDER BY co.Consolidation_Score DESC
         """).fetchall()
-    return {"proposals": [dict(r) for r in rows]}
+    return [
+        {**dict(r), "id": str(r["id"]), "ingredient_id": str(r["ingredient_id"]),
+         "compliance_feasible": bool(r["compliance_feasible"]), "created_at": ""}
+        for r in rows
+    ]
+
+
+@router.get("/fda-limits/{ingredient_id}")
+def fda_limits(ingredient_id: int):
+    with get_db() as db:
+        rows = db.execute(
+            """SELECT Route, DosageForm, MaxPotencyAmount, MaxPotencyUnit,
+                      MaxDailyExposure, MaxDailyExposureUnit, RecordUpdated
+               FROM FDA_Inactive_Ingredient
+               WHERE CanonicalIngredientId = ?
+               ORDER BY Route, DosageForm""",
+            (ingredient_id,),
+        ).fetchall()
+    return {"ingredient_id": ingredient_id, "limits": [dict(r) for r in rows], "count": len(rows)}
+
+
+@router.get("/ingredients/{ingredient_id}/safety")
+def ingredient_safety(ingredient_id: int):
+    from fastapi import HTTPException
+    with get_db() as db:
+        ic = db.execute(
+            """SELECT Name, Grade_Flag, openfda_adverse_event_count
+               FROM Ingredient_Canonical WHERE Id = ?""",
+            (ingredient_id,),
+        ).fetchone()
+        if not ic:
+            raise HTTPException(status_code=404, detail="Ingredient not found")
+        limits = db.execute(
+            """SELECT Route, DosageForm, MaxDailyExposure, MaxDailyExposureUnit
+               FROM FDA_Inactive_Ingredient
+               WHERE CanonicalIngredientId = ? AND MaxDailyExposure IS NOT NULL
+               ORDER BY Route""",
+            (ingredient_id,),
+        ).fetchall()
+    return {
+        "ingredient_id": ingredient_id,
+        "name": ic["Name"],
+        "grade": ic["Grade_Flag"],
+        "adverse_event_count": ic["openfda_adverse_event_count"],
+        "fda_limits": [dict(r) for r in limits],
+    }
+
+
+@router.get("/regulatory-alerts")
+def get_regulatory_alerts():
+    with get_db() as conn:
+        rows = conn.execute("""
+            SELECT
+                cl.Id, cl.ChangeId, cl.SnapshotDate, cl.IngredientName,
+                cl.Route, cl.DosageForm, cl.MaxPotencyPerUnit,
+                cl.MaxDailyExposure, cl.MaxDailyExposureUOM, cl.Status,
+                cl.CanonicalIngredientId, cl.MatchMethod, cl.MatchScore,
+                ic.Name AS canonical_name,
+                ic.Grade_Flag AS grade,
+                MIN(co.Id) AS opportunity_id,
+                MAX(co.Consolidation_Score) AS consolidation_score,
+                MAX(co.regulatory_drift_flag) AS regulatory_drift_flag,
+                co.regulatory_drift_reason
+            FROM FDA_IID_Change_Log cl
+            JOIN Ingredient_Canonical ic ON ic.Id = cl.CanonicalIngredientId
+            LEFT JOIN Consolidation_Opportunity co ON co.CanonicalIngredientId = cl.CanonicalIngredientId
+            GROUP BY cl.ChangeId, cl.SnapshotDate, cl.Route, cl.DosageForm
+            ORDER BY cl.Status ASC, cl.ChangeId ASC
+        """).fetchall()
+
+    alerts: dict[int, dict] = {}
+    for r in rows:
+        cid = r["ChangeId"]
+        if cid not in alerts:
+            alerts[cid] = {
+                "change_id": cid,
+                "ingredient_name": r["canonical_name"] or r["IngredientName"],
+                "status": r["Status"],
+                "route": r["Route"],
+                "dosage_form": r["DosageForm"],
+                "canonical_id": str(r["CanonicalIngredientId"]),
+                "grade": r["grade"],
+                "opportunity_id": str(r["opportunity_id"]) if r["opportunity_id"] else None,
+                "consolidation_score": r["consolidation_score"],
+                "regulatory_drift_flag": bool(r["regulatory_drift_flag"]),
+                "regulatory_drift_reason": r["regulatory_drift_reason"],
+                "snapshots": [],
+            }
+        alerts[cid]["snapshots"].append({
+            "snapshot_date": r["SnapshotDate"],
+            "max_potency": r["MaxPotencyPerUnit"],
+            "max_daily_exposure": r["MaxDailyExposure"],
+            "mde_uom": r["MaxDailyExposureUOM"],
+        })
+
+    return {"alerts": list(alerts.values()), "count": len(alerts)}

@@ -103,3 +103,58 @@ export interface ChatResponse {
   status: RunStatus;
   confidence?: number;
 }
+
+export interface ScoringWeights {
+  price: number;       // 1-5
+  lead_time: number;   // 1-5
+  quality: number;     // 1-5
+}
+
+export interface ScoredSupplier {
+  SupplierId: number;
+  supplier_name: string;
+  Price_USD_Per_KG: number | null;
+  Lead_Time_Days: number | null;
+  MOQ_KG: number | null;
+  Purity_Pct: number | null;
+  Purity_Qualifier: string | null;
+  Grade_Unverified: number;
+  Confidence: number | null;
+  Country_Origin: string | null;
+  Country_Shipping: string | null;
+  Price_Source: string | null;
+  Price_Type: string | null;
+  Last_Updated: string | null;
+  price_score: number;
+  lead_time_score: number;
+  quality_score: number;
+  weighted_score: number;
+}
+
+export interface FdaLimit {
+  Route: string;
+  DosageForm: string;
+  MaxDailyExposure: number | null;
+  MaxDailyExposureUnit: string | null;
+}
+
+export interface PriceAlert {
+  Id: number;
+  CanonicalIngredientId: number;
+  SupplierId: number | null;
+  Ingredient_Name: string;
+  Supplier_Name: string | null;
+  Previous_Price_USD: number | null;
+  New_Price_USD: number | null;
+  Change_Pct: number | null;
+  Direction: "up" | "down";
+  Severity: "info" | "warning" | "critical";
+  Alert_Narrative: string | null;
+  Dismissed: number;
+  Detected_At: string;
+  Run_Id: string | null;
+}
+
+export interface AlertCount {
+  count: number;
+}

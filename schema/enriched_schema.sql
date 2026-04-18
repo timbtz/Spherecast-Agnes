@@ -134,6 +134,8 @@ CREATE TABLE IF NOT EXISTS Consolidation_Opportunity (
     Score_Formula_Component     REAL,            -- formula-computed score component
     Score_LLM_Adjustment        REAL,            -- LLM ±0.10 adjustment (top-50 only)
     Compliance_Feasible         INTEGER,         -- 1=all required certs achievable
+    regulatory_drift_flag       INTEGER DEFAULT 0, -- 1=affected by FDA IID quarterly drift
+    regulatory_drift_reason     TEXT,            -- set by regulatory_drift_alert pipeline
     FOREIGN KEY (CanonicalIngredientId) REFERENCES Ingredient_Canonical(Id)
 );
 
@@ -208,6 +210,79 @@ CREATE TABLE IF NOT EXISTS Certification_Registry (
     Source_URL      TEXT,
     Raw_Data        TEXT                         -- JSON blob of scraped record
 );
+
+-- FDA Inactive Ingredient Database (IID) — max daily exposure limits per route/form
+CREATE TABLE IF NOT EXISTS FDA_Inactive_Ingredient (
+    Id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    IngredientName          TEXT NOT NULL,
+    UNII                    TEXT,
+    CAS_Number              TEXT,
+    Route                   TEXT NOT NULL,
+    DosageForm              TEXT NOT NULL,
+    MaxPotencyAmount        REAL,
+    MaxPotencyUnit          TEXT,
+    MaxDailyExposure        REAL,
+    MaxDailyExposureUnit    TEXT,
+    RecordUpdated           TEXT,
+    CanonicalIngredientId   INTEGER,
+    Source                  TEXT DEFAULT 'fda_iid_csv',
+    FOREIGN KEY (CanonicalIngredientId) REFERENCES Ingredient_Canonical(Id)
+);
+CREATE INDEX IF NOT EXISTS idx_fda_iid_unii       ON FDA_Inactive_Ingredient(UNII);
+CREATE INDEX IF NOT EXISTS idx_fda_iid_canonical  ON FDA_Inactive_Ingredient(CanonicalIngredientId);
+
+-- FDA IID quarterly change log — detects drift (C=corrected, D=deleted, R=revised)
+-- Loaded by enrichment/backfill_iid_changelog.py; updated by regulatory_drift_alert pipeline
+CREATE TABLE IF NOT EXISTS FDA_IID_Change_Log (
+    Id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    ChangeId              INTEGER NOT NULL,
+    SnapshotDate          TEXT NOT NULL,     -- 'Q1 2026' | 'Q2 2026' etc.
+    IngredientName        TEXT NOT NULL,
+    Route                 TEXT,
+    DosageForm            TEXT,
+    MaxPotencyPerUnit     TEXT,              -- stored as TEXT (mixed: numeric, '%w/v', 'NA', blank)
+    MaxDailyExposure      TEXT,              -- stored as TEXT (same reason)
+    MaxDailyExposureUOM   TEXT,
+    Status                TEXT NOT NULL CHECK(Status IN ('C','D','R')),
+    CanonicalIngredientId INTEGER,
+    MatchMethod           TEXT,             -- 'exact' | 'fuzzy'
+    MatchScore            REAL,
+    IngestedAt            TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (CanonicalIngredientId) REFERENCES Ingredient_Canonical(Id),
+    UNIQUE(ChangeId, SnapshotDate, Route, DosageForm)
+);
+CREATE INDEX IF NOT EXISTS idx_iid_cl_canonical ON FDA_IID_Change_Log(CanonicalIngredientId);
+CREATE INDEX IF NOT EXISTS idx_iid_cl_status    ON FDA_IID_Change_Log(Status);
+CREATE INDEX IF NOT EXISTS idx_iid_cl_changeid  ON FDA_IID_Change_Log(ChangeId);
+
+-- Scoring configuration — user-adjustable weights for supplier ranking
+CREATE TABLE IF NOT EXISTS Scoring_Config (
+    Key     TEXT PRIMARY KEY,
+    Value   REAL NOT NULL
+);
+-- Default rows inserted by migration script
+
+-- Price change alerts — detected by price_monitor pipeline
+CREATE TABLE IF NOT EXISTS Price_Change_Alert (
+    Id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    CanonicalIngredientId   INTEGER NOT NULL,
+    SupplierId              INTEGER,
+    Ingredient_Name         TEXT NOT NULL,
+    Supplier_Name           TEXT,
+    Previous_Price_USD      REAL,
+    New_Price_USD           REAL,
+    Change_Pct              REAL,           -- signed: negative = drop, positive = increase
+    Direction               TEXT NOT NULL,  -- 'up' | 'down'
+    Severity                TEXT NOT NULL DEFAULT 'info',  -- 'info' (5-14%) | 'warning' (15-29%) | 'critical' (>=30%)
+    Alert_Narrative         TEXT,           -- filled by PriceAlertWriterAgent
+    Dismissed               INTEGER NOT NULL DEFAULT 0,
+    Detected_At             TEXT NOT NULL DEFAULT (datetime('now')),
+    Run_Id                  TEXT,
+    FOREIGN KEY (CanonicalIngredientId) REFERENCES Ingredient_Canonical(Id),
+    FOREIGN KEY (SupplierId) REFERENCES Supplier(Id)
+);
+CREATE INDEX IF NOT EXISTS idx_price_alert_canonical ON Price_Change_Alert(CanonicalIngredientId);
+CREATE INDEX IF NOT EXISTS idx_price_alert_dismissed ON Price_Change_Alert(Dismissed, Detected_At);
 
 -- ── Cross-cutting Views ──────────────────────────────────────────────────────
 

@@ -31,8 +31,9 @@ function StatusIcon({ status }: { status: NodeRuntimeState["status"] }) {
   return <span className="size-1.5 rounded-full bg-muted-foreground/40" />;
 }
 
-export function DagGraphView({ graph }: { graph: DagGraph }) {
-  const nodeStates = useAgnesStore((s) => s.nodeStates);
+export function DagGraphView({ graph, overrideNodeStates }: { graph: DagGraph; overrideNodeStates?: Record<string, NodeRuntimeState> }) {
+  const storeNodeStates = useAgnesStore((s) => s.nodeStates);
+  const nodeStates = overrideNodeStates ?? storeNodeStates;
   const [expanded, setExpanded] = useState<string | null>(null);
 
   // Compute (col, row) for each node from `layers`
@@ -180,17 +181,69 @@ export function DagGraphView({ graph }: { graph: DagGraph }) {
                   )}
                 </button>
                 {isExpanded && rs.output && (
-                  <div className="absolute z-10 left-0 right-0 mt-1 max-h-48 overflow-auto bg-popover border border-border rounded-md p-2 text-[10.5px] font-mono shadow-lg scrollbar-thin">
-                    <pre className="whitespace-pre-wrap break-words text-foreground/80">
-                      {JSON.stringify(rs.output, null, 2)}
-                    </pre>
-                  </div>
+                  <NodeOutputPanel output={rs.output} />
                 )}
               </div>
             );
           })}
         </div>
       </div>
+    </div>
+  );
+}
+
+// Structured display of node_output — prose fields first, then scalar table, then raw JSON for anything else
+function NodeOutputPanel({ output }: { output: Record<string, unknown> }) {
+  const { summary, proposals_narrative, proposal_text, skipped, error, _elapsed_ms, ...rest } = output;
+  const prose = (summary ?? proposals_narrative ?? proposal_text) as string | undefined;
+  const errorText = (error ?? skipped) as string | undefined;
+
+  const scalars = Object.entries(rest).filter(
+    ([, v]) => typeof v === "string" || typeof v === "number" || typeof v === "boolean",
+  );
+  const complex = Object.entries(rest).filter(
+    ([, v]) => typeof v === "object" && v !== null,
+  );
+
+  return (
+    <div className="absolute z-10 left-0 right-0 mt-1 max-h-72 overflow-auto bg-popover border border-border rounded-md shadow-lg scrollbar-thin text-[11px]">
+      {prose && (
+        <div className="px-3 py-2.5 border-b border-border/60">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Output</p>
+          <p className="text-foreground/90 leading-relaxed whitespace-pre-wrap">{prose}</p>
+        </div>
+      )}
+      {errorText && (
+        <div className="px-3 py-2.5 border-b border-border/60 bg-status-failed/5">
+          <p className="text-[10px] uppercase tracking-wider text-status-failed font-semibold mb-1">{skipped ? "Skipped" : "Error"}</p>
+          <p className="text-status-failed/90 leading-relaxed font-mono text-[10.5px] whitespace-pre-wrap">{errorText}</p>
+        </div>
+      )}
+      {scalars.length > 0 && (
+        <div className="px-3 py-2 border-b border-border/60">
+          <table className="w-full">
+            <tbody>
+              {scalars.map(([k, v]) => (
+                <tr key={k}>
+                  <td className="text-muted-foreground pr-3 py-0.5 font-mono align-top">{k}</td>
+                  <td className="text-foreground/85 py-0.5 font-mono break-all">{String(v)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {complex.length > 0 && (
+        <div className="px-3 py-2">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Data</p>
+          <pre className="text-foreground/70 whitespace-pre-wrap break-words font-mono text-[10px]">
+            {JSON.stringify(Object.fromEntries(complex), null, 2)}
+          </pre>
+        </div>
+      )}
+      {!prose && !errorText && scalars.length === 0 && complex.length === 0 && (
+        <div className="px-3 py-2 text-muted-foreground">No output captured.</div>
+      )}
     </div>
   );
 }

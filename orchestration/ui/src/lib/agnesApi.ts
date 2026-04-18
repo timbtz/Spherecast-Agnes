@@ -1,14 +1,19 @@
 import type {
+  AlertCount,
   ChatResponse,
   ComplianceProduct,
   DagGraph,
+  FdaLimit,
   Ingredient,
   Opportunity,
   PipelineName,
   PipelineRun,
+  PriceAlert,
   Proposal,
   RunDetail,
   RunEvent,
+  ScoredSupplier,
+  ScoringWeights,
 } from "@/types/agnes";
 import { mockData } from "./mockData";
 
@@ -76,40 +81,110 @@ export const agnesApi = {
     return safeFetch(`/pipelines/run/${name}`, { method: "POST" }, { run_id: mockData.newRunId(name) });
   },
 
-  listPipelines(): Promise<string[]> {
-    return safeFetch<string[]>("/pipelines", undefined, [
+  async listPipelines(): Promise<string[]> {
+    const res = await safeFetch<string[] | { pipelines: string[] }>("/pipelines", undefined, [
       "supplier_fallout",
       "proactive_consolidation",
       "new_ingredient_research",
       "substitution_discovery",
       "price_audit",
     ]);
+    return Array.isArray(res) ? res : (res as { pipelines: string[] }).pipelines ?? [];
   },
 
   pipelineGraph(name: string): Promise<DagGraph> {
     return safeFetch<DagGraph>(`/pipelines/${name}/graph`, undefined, mockData.graph(name));
   },
 
-  listRuns(): Promise<PipelineRun[]> {
-    return safeFetch<PipelineRun[]>("/runs", undefined, mockData.runs());
+  async listRuns(): Promise<PipelineRun[]> {
+    const res = await safeFetch<PipelineRun[] | { runs: PipelineRun[] }>("/runs", undefined, mockData.runs());
+    if (Array.isArray(res)) return res;
+    const wrapped = res as { runs: PipelineRun[] };
+    return (wrapped.runs ?? []).map((r) => ({
+      ...r,
+      run_id: r.run_id ?? (r as unknown as Record<string, string>).id,
+      pipeline: (r as unknown as Record<string, string>).pipeline_name ?? r.pipeline,
+      started_at: (r as unknown as Record<string, string>).started_at,
+      duration_ms: (() => {
+        const rr = r as unknown as Record<string, string | null>;
+        if (rr.completed_at && rr.started_at) {
+          return new Date(rr.completed_at).getTime() - new Date(rr.started_at).getTime();
+        }
+        return null;
+      })(),
+    }));
   },
 
-  runDetail(id: string): Promise<RunDetail> {
-    return safeFetch<RunDetail>(`/runs/${id}`, undefined, mockData.runDetail(id));
+  async runDetail(id: string): Promise<RunDetail> {
+    const r = await safeFetch<Record<string, unknown>>(`/runs/${id}`, undefined, mockData.runDetail(id) as unknown as Record<string, unknown>);
+    return {
+      run_id: (r.run_id ?? r.id) as string,
+      pipeline: (r.pipeline ?? r.pipeline_name) as string,
+      status: r.status as RunDetail["status"],
+      started_at: r.started_at as string,
+      ended_at: (r.ended_at ?? r.completed_at ?? null) as string | null,
+      duration_ms: r.duration_ms as number | null ?? (() => {
+        if (r.completed_at && r.started_at) {
+          return new Date(r.completed_at as string).getTime() - new Date(r.started_at as string).getTime();
+        }
+        return null;
+      })(),
+      events: (r.events as RunEvent[] | undefined) ?? [],
+    };
   },
 
-  opportunities(): Promise<Opportunity[]> {
-    return safeFetch<Opportunity[]>("/api/data/opportunities", undefined, mockData.opportunities());
+  async opportunities(): Promise<Opportunity[]> {
+    const r = await safeFetch<{ opportunities: Opportunity[] } | Opportunity[]>("/api/data/opportunities", undefined, mockData.opportunities());
+    return Array.isArray(r) ? r : (r as { opportunities: Opportunity[] }).opportunities ?? [];
   },
-  ingredients(grade?: string): Promise<Ingredient[]> {
+  async ingredients(grade?: string): Promise<Ingredient[]> {
     const q = grade ? `?grade=${encodeURIComponent(grade)}` : "";
-    return safeFetch<Ingredient[]>(`/api/data/ingredients${q}`, undefined, mockData.ingredients(grade));
+    const r = await safeFetch<{ ingredients: Ingredient[] } | Ingredient[]>(`/api/data/ingredients${q}`, undefined, mockData.ingredients(grade));
+    return Array.isArray(r) ? r : (r as { ingredients: Ingredient[] }).ingredients ?? [];
   },
-  compliance(): Promise<ComplianceProduct[]> {
-    return safeFetch<ComplianceProduct[]>("/api/data/compliance", undefined, mockData.compliance());
+  async compliance(): Promise<ComplianceProduct[]> {
+    const r = await safeFetch<ComplianceProduct[] | { products: ComplianceProduct[] }>("/api/data/compliance", undefined, mockData.compliance());
+    return Array.isArray(r) ? r : (r as { products: ComplianceProduct[] }).products ?? [];
   },
-  proposals(): Promise<Proposal[]> {
-    return safeFetch<Proposal[]>("/api/data/proposals", undefined, mockData.proposals());
+  async proposals(): Promise<Proposal[]> {
+    const r = await safeFetch<{ proposals: Proposal[] } | Proposal[]>("/api/data/proposals", undefined, mockData.proposals());
+    return Array.isArray(r) ? r : (r as { proposals: Proposal[] }).proposals ?? [];
+  },
+
+  async scoringWeights(): Promise<ScoringWeights> {
+    return safeFetch<ScoringWeights>("/api/scoring/weights");
+  },
+
+  async saveScoringWeights(weights: ScoringWeights): Promise<ScoringWeights> {
+    return safeFetch<ScoringWeights>("/api/scoring/weights", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        price: weights.price,
+        lead_time: weights.lead_time,
+        quality: weights.quality,
+      }),
+    });
+  },
+
+  async scoredSuppliers(ingredientId: number): Promise<{ ingredient_id: number; weights: ScoringWeights; suppliers: ScoredSupplier[]; count: number }> {
+    return safeFetch(`/api/scoring/suppliers/${ingredientId}`);
+  },
+
+  async fdaLimits(ingredientId: number): Promise<{ ingredient_id: number; limits: FdaLimit[]; count: number }> {
+    return safeFetch(`/api/data/fda-limits/${ingredientId}`);
+  },
+
+  async alertCount(): Promise<AlertCount> {
+    return safeFetch<AlertCount>("/api/alerts/count");
+  },
+
+  async listAlerts(dismissed = false): Promise<{ alerts: PriceAlert[]; count: number }> {
+    return safeFetch(`/api/alerts/?dismissed=${dismissed}`);
+  },
+
+  async dismissAlert(alertId: number): Promise<{ status: string }> {
+    return safeFetch(`/api/alerts/${alertId}/dismiss`, { method: "POST" });
   },
 
   // SSE — caller is responsible for closing

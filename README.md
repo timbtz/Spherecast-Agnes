@@ -53,7 +53,7 @@ Agnes/
 │   ├── db_migrate_v11.py       # Idempotent v1.1 schema migration
 │   ├── backfill_phase1.py      # SMILES + UNII + MatchScore backfill
 │   ├── run_dedup.py            # UNII deduplication + substitution seeding
-│   ├── sources/                # API clients: pubchem.py, dsld.py, molport.py
+│   ├── sources/                # API clients: pubchem.py, dsld.py, molport.py, fda_iid.py, openfda.py
 │   ├── normalizers/            # ingredient_normalizer.py, fuzzy_matcher.py
 │   ├── parsers/                # sku_parser.py
 │   └── enrichers/              # quantity_enricher.py, commercial_enricher.py, compliance_enricher.py, grade_classifier.py, role_classifier.py
@@ -77,7 +77,7 @@ Agnes/
 │   │   ├── event_bus.py        # SSE event bus
 │   │   ├── agent_registry.py   # Agent registration
 │   │   ├── agnes_context.py    # Shared context helpers
-│   │   └── routes/             # chat.py · pipelines.py · data.py · data_update.py
+│   │   └── routes/             # chat.py · pipelines.py · data.py · data_update.py · scoring.py
 │   ├── agents/
 │   │   ├── router_agent.py     # Claude Haiku chat classifier → pipeline name + params
 │   │   ├── reactive_agent.py   # Supplier fallout → find alternatives
@@ -129,13 +129,15 @@ Agnes/
 
 | Table | Rows | Notes |
 |---|---|---|
-| `Ingredient_Canonical` | 250 | 125 SMILES (50%), 135 UNII codes (54%), 239/250 Grade_Flag classified |
+| `Ingredient_Canonical` | 250 | 125 SMILES (50%), 135 UNII codes (54%), 239/250 Grade_Flag classified; 135 adverse_event_count backfilled |
 | `SKU_To_Canonical` | 854 | MatchScore backfilled |
 | `BOM_Component_Quantity` | 515 | 87/149 finished goods (58% coverage) |
 | `Product_Compliance` | 126 | 66 products, 9 cert types |
 | `Supplier_Commercial` | 0 | Stub ready — no-ops without MOLPORT_API_KEY |
 | `Consolidation_Opportunity` | 123 | Scored; top: Vitamin C (25 cos, score=0.893); Proposal_Text empty (needs ANTHROPIC_API_KEY) |
 | `Ingredient_Substitution` | 32 edges | Fuzzy fallback added to graph builder; 18 rules still unresolved |
+| `FDA_Inactive_Ingredient` | 9,067 | From IIR_OCOMM.csv; 1,150 rows matched to canonical ingredients by UNII |
+| `Scoring_Config` | 3 | Default weights: price=3.0, lead_time=3.0, quality=3.0 |
 
 **What's blocked / what to build next:**
 
@@ -178,6 +180,7 @@ Agnes/
 | GET | `/runs/{id}/stream` | SSE stream for live run events |
 | GET | `/proposals` | Consolidation proposals from DB |
 | POST | `/data-update` | Trigger data refresh |
+| GET | `/api/data/regulatory-alerts` | FDA IID quarterly drift alerts grouped by ChangeId |
 | GET | `/ui` | Serve React frontend (from `orchestration/ui/dist/` if built) |
 | GET | `/health` | Health check |
 

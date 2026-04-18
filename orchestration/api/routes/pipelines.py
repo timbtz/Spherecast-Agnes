@@ -46,7 +46,7 @@ async def run_pipeline(name: str, req: RunRequest):
 
 @router.get("/pipelines")
 def list_available_pipelines():
-    return {"pipelines": list_pipelines()}
+    return list_pipelines()
 
 
 @router.get("/pipelines/{name}/graph")
@@ -73,9 +73,31 @@ def get_pipeline_graph(name: str):
     }
 
 
+def _format_run(r: dict) -> dict:
+    from datetime import datetime
+    started = r.get("started_at")
+    ended = r.get("completed_at")
+    duration_ms = None
+    if started and ended:
+        try:
+            dt_start = datetime.strptime(started, "%Y-%m-%d %H:%M:%S")
+            dt_end = datetime.strptime(ended, "%Y-%m-%d %H:%M:%S")
+            duration_ms = int((dt_end - dt_start).total_seconds() * 1000)
+        except Exception:
+            pass
+    return {
+        "run_id": r["id"],
+        "pipeline": r["pipeline_name"],
+        "status": r["status"],
+        "started_at": started,
+        "ended_at": ended,
+        "duration_ms": duration_ms,
+    }
+
+
 @router.get("/runs")
 def list_runs(limit: int = 50):
-    return {"runs": _db.list_runs(limit)}
+    return [_format_run(r) for r in _db.list_runs(limit)]
 
 
 # ── Run status ────────────────────────────────────────────────────────────────
@@ -85,7 +107,9 @@ def get_run(run_id: str):
     run = _db.get_run_with_events(run_id)
     if not run:
         raise HTTPException(404, "Run not found")
-    return run
+    formatted = _format_run(run)
+    formatted["events"] = run.get("events", [])
+    return formatted
 
 
 # ── SSE stream ────────────────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, Workflow, Play } from "lucide-react";
 import { agnesApi } from "@/lib/agnesApi";
 import { useAgnesStore } from "@/store/agnesStore";
@@ -153,10 +153,45 @@ function RunGraph({ runId, pipeline }: { runId: string; pipeline: string }) {
     queryKey: ["graph", pipeline],
     queryFn: () => agnesApi.pipelineGraph(pipeline),
   });
+  const { data: detail } = useQuery({
+    queryKey: ["run-detail", runId],
+    queryFn: () => agnesApi.runDetail(runId),
+  });
+
+  // Build node states from historical events (independent of the global active-run store)
+  const historicalNodeStates = useMemo(() => {
+    if (!detail?.events || !graph) return null;
+    const states: Record<string, import("@/store/agnesStore").NodeRuntimeState> = {};
+    graph.nodes.forEach((n) => { states[n.id] = { id: n.id, status: "pending" }; });
+    for (const ev of detail.events) {
+      const e = ev as import("@/types/agnes").RunEvent & { node_id?: string; data?: string };
+      const rawData = typeof e.data === "string" ? JSON.parse(e.data) : {};
+      const nodeOutput = rawData.node_output ?? e.node_output;
+      const nodeId = e.node_id;
+      if (!nodeId) continue;
+      const cur = states[nodeId] ?? { id: nodeId, status: "pending" as const };
+      if (e.event_type === "node_started") {
+        states[nodeId] = { ...cur, status: "running" };
+      } else if (e.event_type === "node_completed") {
+        states[nodeId] = {
+          ...cur,
+          status: "completed",
+          elapsedMs: nodeOutput?._elapsed_ms,
+          output: nodeOutput,
+        };
+      } else if (e.event_type === "node_failed") {
+        states[nodeId] = { ...cur, status: "failed", output: nodeOutput ?? rawData };
+      } else if (e.event_type === "node_skipped") {
+        states[nodeId] = { ...cur, status: "skipped" };
+      }
+    }
+    return states;
+  }, [detail, graph]);
+
   if (!graph) return <div className="px-4 pb-4"><LoadingState label="Loading graph" /></div>;
   return (
     <div className="px-4 pb-4 animate-fade-in">
-      <DagGraphView graph={graph} />
+      <DagGraphView graph={graph} overrideNodeStates={historicalNodeStates ?? undefined} />
     </div>
   );
 }

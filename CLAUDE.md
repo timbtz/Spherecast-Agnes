@@ -27,13 +27,13 @@
 |---|---|---|
 | `orchestration/api/main.py` | ✅ Live | FastAPI; start: `PYTHONPATH=. uvicorn orchestration.api.main:app --reload --port 8000` |
 | `orchestration/api/dag_executor.py` | ✅ Complete | Topological layers, asyncio.gather(), `orchestration.db` event log, SSE publish |
-| `orchestration/api/pipeline_loader.py` | ✅ Complete | YAML → Pipeline/PipelineNode dataclasses; 5 pipelines loaded |
-| `orchestration/api/conditions.py` | ✅ Complete | 7 named condition guards incl. `compliance_reasoner_feasible` |
+| `orchestration/api/pipeline_loader.py` | ✅ Complete | YAML → Pipeline/PipelineNode dataclasses; 7 pipelines loaded |
+| `orchestration/api/conditions.py` | ✅ Complete | 9 named condition guards incl. `has_stale_prices`, `has_price_alerts` |
 | `orchestration/agents/router_agent.py` | ✅ Complete | Claude-Haiku chat classifier → pipeline name + params JSON |
-| `orchestration/agents/{reactive,proactive,research,proposal_writer}` | ✅ Complete | All Claude-based; Google API key (`AQ.` format) confirmed working; search_sub_agent wired |
-| `orchestration/tools/` | ✅ Complete | 8 deterministic tools: supplier_alternatives, compliance_gate, compliance_reasoner_tool, substitution_walker, bom_impact, price_benchmark, opportunity_ranker, rfq_formatter |
-| `orchestration/pipelines/` | ✅ 5 pipelines | supplier_fallout, proactive_consolidation, new_ingredient_research, substitution_discovery, price_audit |
-| **Endpoints** | ✅ 8 endpoints | POST /chat, POST /pipelines/run/{name}, GET /pipelines, GET /runs, GET /runs/{id}, GET /runs/{id}/stream (SSE), GET /proposals, POST /data-update |
+| `orchestration/agents/{reactive,proactive,research,proposal_writer,price_fetch_agent,price_alert_writer}` | ✅ Complete | All Claude/Gemini-based; search_sub_agent wired |
+| `orchestration/tools/` | ✅ Complete | 10 deterministic tools: + regulatory_drift_tool |
+| `orchestration/pipelines/` | ✅ 7 pipelines | + regulatory_drift_alert (data_update trigger) |
+| **Endpoints** | ✅ 17 endpoints | + GET /api/data/regulatory-alerts |
 
 ---
 
@@ -42,7 +42,7 @@
 | Layer | Status | Notes |
 |---|---|---|
 | `schema/enriched_schema.sql` | ✅ v1.1 | 15 new columns; Supplier_Commercial.Confidence TEXT→REAL fixed |
-| `db_enriched.sqlite` | ✅ v1.1 — all phases run | 125 SMILES (50.0%), 135 UNII (54.0%), 250 canonicals, 515 BOM, 126 compliance, 123 CO rows; Vitamin C → 33 cos |
+| `db_enriched.sqlite` | ✅ v1.1 + FDA/Scoring — all phases run | 9067 FDA IID rows (1150 matched), Scoring_Config defaults, 135 AE counts; 125 SMILES, 250 canonicals, 515 BOM, 126 compliance, 123 CO rows |
 | Phase 1 — Ingredient Identity | ✅ Complete | CID gap backfill: 20 new CIDs via UNII/name lookup; 2nd dedup pass merged 7 more pairs; dedup merge bug fixed |
 | Phase 2 — BOM Quantities | ✅ Complete | 515 rows, 87/149 FG covered (58%); fingerprint match: brand+ingredient query + overlap≥2 |
 | Phase 3 — Commercial/Compliance | ✅ Complete | 126 rows, 66 products, 9 cert types; fixed stmt.notes key + Phase 2 label reuse |
@@ -54,6 +54,29 @@
 | `enrichment/db_migrate_v11.py` | ✅ New | Idempotent v1.1 migration; called by db_bootstrap.py |
 | `enrichment/backfill_phase1.py` | ✅ New | SMILES + UNII + MatchScore backfill; commits per-row to avoid DB lock |
 | `enrichment/run_dedup.py` | ✅ New | UNII dedup + substitution seeding; run after backfill_unii |
+| `enrichment/sources/fda_iid.py` | ✅ Complete | Loads IIR_OCOMM.csv → FDA_Inactive_Ingredient; 9067 rows, 1150 canonical matches |
+| `enrichment/sources/openfda.py` | ✅ Complete | OpenFDAClient: adverse_event_count() + search_labels(); rate-limited 0.26s/req; cached 7d |
+| `enrichment/backfill_openfda.py` | ✅ Complete + run | Populates openfda_adverse_event_count on 135 UNII-bearing canonicals |
+| `enrichment/db_migrate_fda_scoring.py` | ✅ Complete + run | Creates FDA_Inactive_Ingredient, Scoring_Config tables; adds openfda_adverse_event_count column |
+| `enrichment/db_migrate_iid_changelog.py` | ✅ Complete + run | Creates FDA_IID_Change_Log (187 rows, 27 matched); adds regulatory_drift_flag/reason to Consolidation_Opportunity |
+| `enrichment/sources/fda_iid_changelog.py` | ✅ Complete + run | Loads Change_Log_Data.csv → FDA_IID_Change_Log; fuzzy name matching; accepts optional csv_path |
+| `enrichment/backfill_iid_changelog.py` | ✅ Complete + run | Top-level runner: migrate + CSV load; idempotent |
+| `orchestration/tools/regulatory_drift_tool.py` | ✅ Complete | Pairs C rows, assigns severity HIGH/MEDIUM/LOW, cross-refs Consolidation_Opportunity |
+| `orchestration/agents/regulatory_research_agent.py` | ✅ Complete | Searches FDA quarterly change log; downloads CSV if found; graceful fallback on failure |
+| `orchestration/agents/regulatory_drift_agent.py` | ✅ Complete | Gemini narrative for drift alerts; writes regulatory_drift_flag to DB |
+| `orchestration/pipelines/regulatory_drift_alert.yaml` | ✅ Complete | 4-node: fetch-latest-changes → scan-drift → find-alternatives → write-alerts |
+| `enrichment/db_migrate_price_monitor.py` | ✅ Complete + run | Creates Price_Change_Alert table + indexes; idempotent |
+| `enrichment/enrichers/supplier_web_enricher.py` | ✅ New | Async; calls search_sub_agent, parses JSON, upserts Supplier_Commercial; Price_Source='google_search' |
+| `enrichment/backfill_supplier_web.py` | ✅ New | Batch script; requires GOOGLE_API_KEY; run to populate Supplier_Commercial from web |
+| `orchestration/tools/price_staleness_checker.py` | ✅ New | Sync DAG tool; finds UNII canonicals with missing/stale web prices (>7d) |
+| `orchestration/agents/price_fetch_agent.py` | ✅ New | Async DAG agent; fetches prices via search_sub_agent; writes Price_Change_Alert on >=15% change |
+| `orchestration/agents/price_alert_writer.py` | ✅ New | Async DAG agent; Gemini narrative; persists to Price_Change_Alert.Alert_Narrative |
+| `orchestration/api/routes/alerts.py` | ✅ New | GET count/list, POST dismiss, GET per-ingredient |
+| `reasoning/supplier_scorer.py` | ✅ Complete + score_suppliers_with_context() | Returns grade guidelines alongside ranked supplier list |
+| `reasoning/supplier_guidelines.py` | ✅ New | Reads Orchestration/Data/supplier_wiki/{grade}.md for scoring context |
+| `Orchestration/Data/supplier_wiki/` | ✅ New | supplements.md, excipients.md, food.md — price ranges, quality flags, lead time norms |
+| `orchestration/api/routes/scoring.py` | ✅ Complete | GET/POST /api/scoring/weights, GET /api/scoring/suppliers/{id} |
+| `orchestration/tools/compliance_reasoner_tool.py` | ✅ Augmented | Now returns fda_iid_max_daily_mg, fda_iid_routes, fda_iid_data_available after ComplianceReasoner |
 | `enrichment/sources/rxnorm.py` | ❌ Missing | Low priority — narrow use (drug-class ingredients only) |
 | `enrichment/sources/fdc.py` | ❌ Missing | Low priority — only useful for ~5 food-macro SKUs |
 | `reasoning/consolidation_scorer.py` | ✅ Fixed + run | Formula: company×0.40 + bom×0.25 + fragmentation×0.20 + supplier_spread×0.15; 129 rows scored |

@@ -4,7 +4,10 @@ Reads canonical_id from upstream node output (find-alternatives OR find-substitu
 Builds ComplianceInput from DB, runs ComplianceReasoner, applies CONFIDENCE_FLOOR.
 Returns structured dict for downstream nodes and condition guards.
 """
+import logging
 import sqlite3
+
+logger = logging.getLogger("agnes.compliance_reasoner_tool")
 
 from orchestration.api.agnes_context import AgnesContext
 from reasoning.compliance_reasoner import ComplianceReasoner, ComplianceInput
@@ -90,6 +93,31 @@ def run(ctx: AgnesContext) -> dict:
     # "refuse" means not viable; others are viable with caveats
     viable = outcome != "refuse" and above_floor
 
+    # FDA IID max-daily-exposure lookup
+    fda_max = None
+    fda_routes: list[str] = []
+    try:
+        iid_conn = sqlite3.connect(str(ctx.enriched_db_path))
+        iid_conn.row_factory = sqlite3.Row
+        unii_row = iid_conn.execute(
+            "SELECT UNII_Code FROM Ingredient_Canonical WHERE Id = ?", (canonical_id,)
+        ).fetchone()
+        if unii_row and unii_row["UNII_Code"]:
+            iid_rows = iid_conn.execute(
+                """SELECT Route, MIN(MaxDailyExposure) as min_exp
+                   FROM FDA_Inactive_Ingredient
+                   WHERE UNII = ? AND MaxDailyExposure IS NOT NULL
+                   GROUP BY Route""",
+                (unii_row["UNII_Code"],)
+            ).fetchall()
+            fda_routes = [r["Route"] for r in iid_rows]
+            oral_rows = [r for r in iid_rows if r["Route"] == "ORAL"]
+            if oral_rows:
+                fda_max = oral_rows[0]["min_exp"]
+        iid_conn.close()
+    except Exception as e:
+        logger.warning(f"FDA IID lookup failed for canonical {canonical_id}: {e}")
+
     return {
         "outcome": outcome,
         "compound_confidence": comp_confidence,
@@ -101,4 +129,7 @@ def run(ctx: AgnesContext) -> dict:
         "reason": (comp_result.result or {}).get("reason", ""),
         "refusal": comp_result.refusal,
         "canonical_id": canonical_id,
+        "fda_iid_max_daily_mg": fda_max,
+        "fda_iid_routes": fda_routes,
+        "fda_iid_data_available": len(fda_routes) > 0,
     }

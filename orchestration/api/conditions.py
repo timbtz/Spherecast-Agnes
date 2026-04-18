@@ -42,6 +42,21 @@ def compliance_reasoner_feasible(ctx: AgnesContext) -> bool:
     return bool(result.get("qualified")) and bool(result.get("above_floor"))
 
 
+def has_stale_prices(ctx: AgnesContext) -> bool:
+    out = ctx.get("find-stale", {})
+    return out.get("count", 0) > 0
+
+
+def has_price_alerts(ctx: AgnesContext) -> bool:
+    out = ctx.get("fetch-prices", {})
+    return out.get("count", 0) > 0
+
+
+def has_regulatory_drift(ctx: AgnesContext) -> bool:
+    out = ctx.get("scan-drift", {})
+    return bool(out.get("drift_alerts"))
+
+
 _REGISTRY: dict[str, ConditionFn] = {
     "has_alternatives": has_alternatives,
     "above_score_threshold": above_score_threshold,
@@ -50,6 +65,9 @@ _REGISTRY: dict[str, ConditionFn] = {
     "compliance_feasible": compliance_feasible,
     "has_research_results": has_research_results,
     "compliance_reasoner_feasible": compliance_reasoner_feasible,
+    "has_stale_prices": has_stale_prices,
+    "has_price_alerts": has_price_alerts,
+    "has_regulatory_drift": has_regulatory_drift,
 }
 
 

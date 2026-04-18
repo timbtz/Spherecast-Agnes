@@ -32,7 +32,9 @@ def run(ctx: AgnesContext) -> dict:
             s.Name                      AS recommended_supplier,
             co.Estimated_Savings_Narrative,
             co.Proposal_Text,
-            co.Generated_At
+            co.Generated_At,
+            co.regulatory_drift_flag,
+            co.regulatory_drift_reason
         FROM Consolidation_Opportunity co
         JOIN Ingredient_Canonical ic ON ic.Id = co.CanonicalIngredientId
         LEFT JOIN Supplier s ON s.Id = co.Recommended_SupplierId
@@ -45,7 +47,10 @@ def run(ctx: AgnesContext) -> dict:
 
     conn.close()
 
-    opportunities = [dict(r) for r in rows]
+    opportunities = [
+        {**dict(r), "regulatory_drift_flag": bool(r["regulatory_drift_flag"])}
+        for r in rows
+    ]
     return {
         "opportunities": opportunities,
         "count": len(opportunities),
