@@ -7,8 +7,8 @@ nodes:
     tool_class: SupplierAlternativesTool
     depends_on: []
 
-  - id: gate-qualify
-    tool_class: ComplianceGateTool
+  - id: gate-compliance
+    tool_class: ComplianceReasonerTool
     depends_on: [find-alternatives]
     when: has_alternatives
 
@@ -18,8 +18,8 @@ nodes:
 
   - id: format-rfqs
     tool_class: RfqFormatterTool
-    depends_on: [gate-qualify, bom-impact]
-    when: compliance_feasible
+    depends_on: [gate-compliance, bom-impact]
+    when: compliance_reasoner_feasible
 
   - id: write-proposal
     agent_class: ReactiveAgent

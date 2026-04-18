@@ -44,6 +44,7 @@ async def run(ctx: AgnesContext) -> dict:
     proposals_narrative = await run_adk_agent(_AGENT, payload, ctx.run_id)
 
     return {
+        "summary": proposals_narrative,
         "proposals_narrative": proposals_narrative,
         "opportunity_count": len(opportunities),
         "top_ingredient": opportunities[0]["ingredient_name"] if opportunities else None,

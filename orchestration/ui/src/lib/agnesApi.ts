@@ -67,7 +67,7 @@ export const agnesApi = {
     }
     return safeFetch<ChatResponse>("/chat", {
       method: "POST",
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ message: text }),
     }, mockData.simulateChat(text));
   },
 

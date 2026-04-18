@@ -9,12 +9,14 @@ from orchestration.api.agnes_context import AgnesContext
 
 
 def run(ctx: AgnesContext) -> dict:
-    qualified = ctx.get("gate-qualify", {}).get("qualified", [])
+    # gate-compliance returns a bool; fetch actual supplier list from find-alternatives
+    gate = ctx.get("gate-compliance", {})
+    alternatives = ctx.get("find-alternatives", {}).get("alternatives", []) if gate.get("qualified") else []
     ingredient_name = ctx.trigger_payload.get("ingredient_name", "unknown")
     bom_impact = ctx.get("bom-impact", {})
 
     rfqs = []
-    for supplier in qualified[:3]:  # top 3 qualified suppliers
+    for supplier in alternatives[:3]:  # top 3 qualified suppliers
         rfq = {
             "rfq_type": "consolidation_inquiry",
             "ingredient_name": ingredient_name,

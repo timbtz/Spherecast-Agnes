@@ -40,38 +40,18 @@ app.include_router(pipelines.router)
 app.include_router(data_update.router)
 app.include_router(data.router)
 
-_UI_DIST = Path(__file__).parent.parent / "ui" / "dist"
-_UI_DEV = Path(__file__).parent.parent / "ui"
-_SERVE = _UI_DIST if _UI_DIST.exists() else _UI_DEV
-if _SERVE.exists():
-    app.mount("/ui/assets", StaticFiles(directory=str(_SERVE / "assets")), name="ui-assets")
-
-    @app.get("/ui", include_in_schema=False)
-    @app.get("/ui/", include_in_schema=False)
-    def ui_index():
-        return FileResponse(
-            str(_SERVE / "index.html"),
-            headers={"Cache-Control": "no-store"},
-        )
-
-
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "agnes-orchestration"}
 
 
-@app.get("/")
-def root():
-    return {
-        "service": "Agnes Orchestration API",
-        "endpoints": {
-            "POST /chat": "Send a natural-language message; Agnes picks the pipeline",
-            "POST /pipelines/run/{name}": "Trigger a named pipeline directly",
-            "GET  /pipelines": "List available pipelines",
-            "GET  /runs": "List recent pipeline runs",
-            "GET  /runs/{run_id}": "Run status + full event log",
-            "GET  /runs/{run_id}/stream": "SSE stream of live pipeline events",
-            "GET  /proposals": "List completed proposals",
-            "POST /data-update": "Trigger proactive consolidation on new external data",
-        },
-    }
+# --- SPA (Lovable frontend) served at root ---
+# Build: cd orchestration/ui && bun install && bun run build
+# Update from Lovable: ./pull-ui.sh
+_UI_DIST = Path(__file__).parent.parent / "ui" / "dist"
+if _UI_DIST.exists():
+    app.mount("/assets", StaticFiles(directory=str(_UI_DIST / "assets")), name="ui-assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def spa_index(full_path: str):
+        return FileResponse(str(_UI_DIST / "index.html"), headers={"Cache-Control": "no-store"})

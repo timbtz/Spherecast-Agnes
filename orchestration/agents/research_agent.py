@@ -46,6 +46,7 @@ async def run(ctx: AgnesContext) -> dict:
         _stage_suppliers(discovered, ingredient_name, ctx.enriched_db_path)
 
     return {
+        "summary": f"Found {len(discovered)} suppliers for {ingredient_name}.",
         "discovered_suppliers": discovered,
         "ingredient_name": ingredient_name,
         "count": len(discovered),

@@ -34,3 +34,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Local dev — contributor work, not part of main branch
+local-dev/

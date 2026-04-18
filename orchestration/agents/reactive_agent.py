@@ -44,6 +44,7 @@ async def run(ctx: AgnesContext) -> dict:
     compliance = ctx.get("gate-qualify", {})
     bom = ctx.get("bom-impact", {})
     return {
+        "summary": narrative,
         "narrative": narrative,
         "ingredient_name": ctx.trigger_payload.get("ingredient_name"),
         "qualified_supplier_count": len(compliance.get("qualified", [])),

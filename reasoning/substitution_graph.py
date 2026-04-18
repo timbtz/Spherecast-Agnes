@@ -4,6 +4,8 @@ import logging
 import sqlite3
 from pathlib import Path
 
+from rapidfuzz import fuzz, process
+
 ROOT = Path(__file__).parent.parent
 ENRICHED_DB = ROOT / "db_enriched.sqlite"
 
@@ -33,10 +35,16 @@ class SubstitutionGraphBuilder:
             "FROM Ingredient_Substitution_Rule"
         ).fetchall()
 
+        # Pre-load canonical names once to avoid N+1 queries for fuzzy fallback
+        names_cache = {
+            row[0].strip().lower(): row[1]
+            for row in conn.execute("SELECT Name, Id FROM Ingredient_Canonical").fetchall()
+        }
+
         inserted = 0
         for name_a, name_b, rule_type, confidence, justification, source in rules:
-            id_a = self._canonical_id(conn, name_a)
-            id_b = self._canonical_id(conn, name_b)
+            id_a = self._canonical_id(conn, name_a, names_cache)
+            id_b = self._canonical_id(conn, name_b, names_cache)
             if id_a is None or id_b is None:
                 logger.debug(f"Skipping rule '{name_a}' ↔ '{name_b}': one or both not in canonical table")
                 continue
@@ -79,11 +87,34 @@ class SubstitutionGraphBuilder:
         if inserted:
             logger.info(f"Added {inserted} identical-CAS substitution edges")
 
-    def _canonical_id(self, conn: sqlite3.Connection, name: str) -> int | None:
+    def _canonical_id(
+        self, conn: sqlite3.Connection, name: str, names_cache: dict | None = None
+    ) -> int | None:
+        # Stage 1: exact match (case + whitespace insensitive)
         row = conn.execute(
-            "SELECT Id FROM Ingredient_Canonical WHERE Name = ? COLLATE NOCASE", (name,)
+            "SELECT Id FROM Ingredient_Canonical WHERE LOWER(TRIM(Name)) = LOWER(TRIM(?))",
+            (name,),
         ).fetchone()
-        return row[0] if row else None
+        if row:
+            return row[0]
+
+        # Stage 2: rapidfuzz fuzzy match against preloaded names cache
+        if names_cache:
+            match = process.extractOne(
+                name.strip().lower(),
+                list(names_cache.keys()),
+                scorer=fuzz.ratio,
+                score_cutoff=85,
+            )
+            if match:
+                matched_name, score, _ = match
+                canonical_id = names_cache[matched_name]
+                logger.debug(
+                    f"Fuzzy match: '{name}' → '{matched_name}' (score={score:.0f}, id={canonical_id})"
+                )
+                return canonical_id
+
+        return None
 
 
 def seed_substitutions_from_unii_history(

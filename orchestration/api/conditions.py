@@ -36,6 +36,12 @@ def has_research_results(ctx: AgnesContext) -> bool:
     return bool(out.get("discovered_suppliers"))
 
 
+def compliance_reasoner_feasible(ctx: AgnesContext) -> bool:
+    """True when ComplianceReasonerTool returned a viable (non-refused, above-floor) result."""
+    result = ctx.get("gate-compliance", {})
+    return bool(result.get("qualified")) and bool(result.get("above_floor"))
+
+
 _REGISTRY: dict[str, ConditionFn] = {
     "has_alternatives": has_alternatives,
     "above_score_threshold": above_score_threshold,
@@ -43,6 +49,7 @@ _REGISTRY: dict[str, ConditionFn] = {
     "has_price_deviations": has_price_deviations,
     "compliance_feasible": compliance_feasible,
     "has_research_results": has_research_results,
+    "compliance_reasoner_feasible": compliance_reasoner_feasible,
 }
 
 

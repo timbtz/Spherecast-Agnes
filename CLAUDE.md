@@ -1,16 +1,23 @@
 # Agnes — Agent Working Reference
 
 > **Self-maintenance rule:** After any meaningful change — phase run, schema edit, new finding, bug fix — update the relevant section below. Max 3 lines per entry. No prose.
+>
+> **README self-maintenance rule:** After any meaningful change — new endpoint, pipeline, UI feature, DB state change — update `README.md` to match. This applies to every coding session working in this repo.
 
 ---
 
-## Voice / UI Layer (Planned)
+## Voice / UI Layer
 
 | Component | Status | Notes |
 |---|---|---|
+| `orchestration/ui/` | ✅ Active (Lovable) | git subtree from `timbtz/agnes-ai-navigator`; served at `/` by FastAPI; build: `cd orchestration/ui && bun run build` |
+| `orchestration/ui_legacy/` | ❌ Inactive | Original hand-built Vite+React UI; archived as fallback; see `README_INACTIVE.md` |
+| `pull-ui.sh` | ✅ Script | `./pull-ui.sh` — pulls latest from Lovable repo, rebuilds dist |
+| `orchestration/ui/.env` | ✅ Local only | `VITE_AGNES_API_URL=http://localhost:8000`, `VITE_ELEVENLABS_API_KEY`, `VITE_ELEVENLABS_VOICE_ID` |
 | `REF-ELEVENLABS-ORB-UI.md` | ✅ Reference written | ElevenLabs WebGL Orb component — props, patterns, color palettes per pipeline |
 | `REF-ELEVENLABS-VOICE-PIPELINE-INTEGRATION.md` | ✅ Reference written | Full integration guide: STT→/chat→SSE→TTS, Orb state machine, Option 1 (custom) + Option 2 (Conversational AI agent) |
-| `orchestration/ui/voice/` | ⏳ Not built | Recommended: Vite+React page; Orb + useAgnesVoice hook; served at `/voice` from FastAPI |
+
+**Lovable sync workflow:** iterate in Lovable → push to `timbtz/agnes-ai-navigator` → run `./pull-ui.sh` here → restart FastAPI
 
 ---
 
@@ -21,10 +28,10 @@
 | `orchestration/api/main.py` | ✅ Live | FastAPI; start: `PYTHONPATH=. uvicorn orchestration.api.main:app --reload --port 8000` |
 | `orchestration/api/dag_executor.py` | ✅ Complete | Topological layers, asyncio.gather(), `orchestration.db` event log, SSE publish |
 | `orchestration/api/pipeline_loader.py` | ✅ Complete | YAML → Pipeline/PipelineNode dataclasses; 5 pipelines loaded |
-| `orchestration/api/conditions.py` | ✅ Complete | 6 named condition guards for YAML `when:` clauses |
+| `orchestration/api/conditions.py` | ✅ Complete | 7 named condition guards incl. `compliance_reasoner_feasible` |
 | `orchestration/agents/router_agent.py` | ✅ Complete | Claude-Haiku chat classifier → pipeline name + params JSON |
-| `orchestration/agents/{reactive,proactive,research,proposal_writer}` | ✅ Complete | All Claude-based; ADK/Gemini path in search_sub_agent.py (needs Gemini API enabled) |
-| `orchestration/tools/` | ✅ Complete | 7 deterministic tools (no LLM): supplier_alternatives, compliance_gate, substitution_walker, bom_impact, price_benchmark, opportunity_ranker, rfq_formatter |
+| `orchestration/agents/{reactive,proactive,research,proposal_writer}` | ✅ Complete | All Claude-based; Google API key (`AQ.` format) confirmed working; search_sub_agent wired |
+| `orchestration/tools/` | ✅ Complete | 8 deterministic tools: supplier_alternatives, compliance_gate, compliance_reasoner_tool, substitution_walker, bom_impact, price_benchmark, opportunity_ranker, rfq_formatter |
 | `orchestration/pipelines/` | ✅ 5 pipelines | supplier_fallout, proactive_consolidation, new_ingredient_research, substitution_discovery, price_audit |
 | **Endpoints** | ✅ 8 endpoints | POST /chat, POST /pipelines/run/{name}, GET /pipelines, GET /runs, GET /runs/{id}, GET /runs/{id}/stream (SSE), GET /proposals, POST /data-update |
 
@@ -39,8 +46,8 @@
 | Phase 1 — Ingredient Identity | ✅ Complete | CID gap backfill: 20 new CIDs via UNII/name lookup; 2nd dedup pass merged 7 more pairs; dedup merge bug fixed |
 | Phase 2 — BOM Quantities | ✅ Complete | 515 rows, 87/149 FG covered (58%); fingerprint match: brand+ingredient query + overlap≥2 |
 | Phase 3 — Commercial/Compliance | ✅ Complete | 126 rows, 66 products, 9 cert types; fixed stmt.notes key + Phase 2 label reuse |
-| Phase 4 — Reasoning/Proposals | ⏳ Phase A fixes done, proposals blocked | 123 CO rows; scorer correct; proposals need ANTHROPIC_API_KEY; Grade_Flag populated, substitution edges=30, compliance filter fixed |
-| Phase A — Data Quality Fixes | ✅ Complete | Grade_Flag: 239/250 classified (11 unknown); substitution edges: 4→30; compliance status filter fixed ('implied' added); proposals TARGET=50 |
+| Phase 4 — Reasoning/Proposals | ⏳ Proposals still need running | 123 CO rows scored; ANTHROPIC_API_KEY set — run `reasoning/proposal_generator.py` to populate Proposal_Text; substitution edges=32; Function column fully populated (0 NULL) |
+| Phase A — Data Quality Fixes | ✅ Complete | Grade_Flag: 239/250 classified (11 unknown); substitution edges: 4→32 (fuzzy fallback added); compliance status filter fixed; Function column populated via role_classifier |
 | `enrichment/sources/pubchem.py` | ✅ Implemented | get_isomeric_smiles() + get_unii_from_synonyms() + get_cid_by_name(); rate-limited (4.5 req/sec), cache-first |
 | `enrichment/sources/dsld.py` | ✅ Implemented | DSLD v9, cached |
 | `enrichment/sources/molport.py` | ✅ Stub | Graceful no-op if MOLPORT_API_KEY absent; CAS→SMILES→supplier chain |
@@ -50,8 +57,14 @@
 | `enrichment/sources/rxnorm.py` | ❌ Missing | Low priority — narrow use (drug-class ingredients only) |
 | `enrichment/sources/fdc.py` | ❌ Missing | Low priority — only useful for ~5 food-macro SKUs |
 | `reasoning/consolidation_scorer.py` | ✅ Fixed + run | Formula: company×0.40 + bom×0.25 + fragmentation×0.20 + supplier_spread×0.15; 129 rows scored |
-| `reasoning/substitution_graph.py` | ✅ Re-run | 30 edges (18 rules); fix_substitution_rules.py updated 20 Name_A/B aliases; 18 still unresolved (no canonical match) |
+| `reasoning/substitution_graph.py` | ✅ Re-run | 32 edges; fuzzy fallback (_canonical_id rapidfuzz≥85) added; 18 rules still unresolved (Fish Oil, Ergocalciferol, etc.) |
+| `reasoning/base.py` | ✅ New | ToolResult, Tool ABC, compound_confidence() — lifted from local-dev |
+| `reasoning/role_inferrer.py` | ✅ New | RoleInferrer, ROLE_RULES, covers_roles() — lifted from local-dev |
+| `reasoning/compliance_reasoner.py` | ✅ New | ComplianceReasoner, JURISDICTION_PACKS (US-FDA, EU, CA, JP, US-USP) — lifted from local-dev |
+| `reasoning/refusal_engine.py` | ✅ New | RefusalEngine, CONFIDENCE_FLOOR=0.50 — lifted from local-dev; _persist() no-op'd for DAG thread safety |
 | `enrichment/enrichers/grade_classifier.py` | ✅ New + run | Heuristic classifier; 239/250 classified; supplement:117, food:62, excipient:32, sweetener:15, flavor:13, unknown:11 |
+| `enrichment/enrichers/role_classifier.py` | ✅ New + run | Heuristic Function classifier; 0 NULL rows; 177 non-unknown roles populated |
+| `orchestration/tools/compliance_reasoner_tool.py` | ✅ New | 4-state DAG tool: reads canonical_id → ComplianceReasoner → RefusalEngine → returns outcome/per_jurisdiction/above_floor |
 | `scripts/fix_substitution_rules.py` | ✅ New + run | Alias-table UPDATE for Ingredient_Substitution_Rule; 20 updated, 2 already-correct, 18 unresolved |
 | `enrichment/enrichers/commercial_enricher.py` | ✅ _enrich_pair wired | MolportClient integration complete; no-ops when MOLPORT_API_KEY absent |
 
@@ -66,16 +79,9 @@ Each phase is idempotent. Re-run any phase safely. Cache hit rate ≥ 90% on sec
 
 ---
 
-## Schema Delta: v1.0 → v1.1 (not yet applied)
+## Schema: v1.1 (applied ✅)
 
-Fields to add per PRD §7:
-- `Ingredient_Canonical`: `UNII_Code`, `Molport_Id`, `FDC_Id`, `RxCUI`, `SMILES`, `Grade_Flag`
-- `SKU_To_Canonical`: `MatchScore`
-- `Supplier_Commercial`: fix `Confidence TEXT→REAL`; add `Price_Qty_KG`, `Purity_Pct`, `Purity_Qualifier`, `Grade_Unverified`, `Molport_Catalog_Id`, `Data_Freshness_Days`, `Country_Shipping`
-- `BOM_Component_Quantity`: `ServingsPerContainer`, `OffMarket`, `DSLD_Label_Id`
-- `Consolidation_Opportunity`: `Unique_SKU_Count`, `Score_Formula_Component`, `Score_LLM_Adjustment`, `Compliance_Feasible`
-- `Product_Compliance`: `Off_Market_Warning`
-- `Ingredient_Substitution`: `Caveats`
+All v1.1 fields are live in `db_enriched.sqlite`. `enrichment/db_migrate_v11.py` applied idempotently. No pending schema changes.
 
 ---
 

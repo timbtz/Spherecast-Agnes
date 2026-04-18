@@ -16,6 +16,7 @@ _TOOL_REGISTRY: dict[str, str] = {
     "PriceBenchmarkTool":        "orchestration.tools.price_benchmark:run",
     "OpportunityRankerTool":     "orchestration.tools.opportunity_ranker:run",
     "RfqFormatterTool":          "orchestration.tools.rfq_formatter:run",
+    "ComplianceReasonerTool":    "orchestration.tools.compliance_reasoner_tool:run",
 }
 
 

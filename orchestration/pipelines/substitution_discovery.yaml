@@ -7,6 +7,11 @@ nodes:
     tool_class: SubstitutionWalkerTool
     depends_on: []
 
+  - id: gate-compliance
+    tool_class: ComplianceReasonerTool
+    depends_on: [find-substitutes]
+    when: has_substitutes
+
   - id: find-alternatives
     tool_class: SupplierAlternativesTool
     depends_on: [find-substitutes]
@@ -23,5 +28,5 @@ nodes:
 
   - id: write-proposal
     agent_class: ProposalWriter
-    depends_on: [find-alternatives, bom-impact, benchmark-prices]
+    depends_on: [gate-compliance, find-alternatives, bom-impact, benchmark-prices]
     when: has_substitutes

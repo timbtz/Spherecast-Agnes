@@ -61,15 +61,32 @@ def ingredients(grade: str | None = Query(default=None)):
 def compliance():
     with get_db() as db:
         rows = db.execute("""
-            SELECT pc.ProductId as product_id, c.Name as company,
+            SELECT pc.ProductId as product_id, p.SKU as product_name, c.Name as company,
                    pc.Certification as cert_type, pc.Status as status,
-                   pc.Source as cert_body, pc.Off_Market_Warning as off_market_warning
+                   pc.Off_Market_Warning as off_market_warning
             FROM Product_Compliance pc
             JOIN Product p ON p.Id = pc.ProductId
             JOIN Company c ON c.Id = p.CompanyId
-            ORDER BY c.Name, pc.Certification
+            ORDER BY c.Name, p.SKU
         """).fetchall()
-    return {"compliance": [dict(r) for r in rows]}
+
+    # Pivot: one object per product with certifications dict
+    products: dict[int, dict] = {}
+    for r in rows:
+        pid = r["product_id"]
+        if pid not in products:
+            products[pid] = {
+                "product_id": str(pid),
+                "product_name": r["product_name"] or f"Product {pid}",
+                "company": r["company"],
+                "off_market": bool(r["off_market_warning"]),
+                "certifications": {},
+            }
+        status = r["status"] or "implied"
+        cert_status = "certified" if status == "confirmed" else "implied"
+        products[pid]["certifications"][r["cert_type"]] = cert_status
+
+    return list(products.values())
 
 
 @router.get("/proposals")
