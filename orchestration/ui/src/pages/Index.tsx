@@ -10,6 +10,7 @@ import { ProposalsView } from "@/components/views/ProposalsView";
 import { PipelineRunsView } from "@/components/views/PipelineRunsView";
 import { SuppliersView } from "@/components/views/SuppliersView";
 import { AlertsView } from "@/components/views/AlertsView";
+import { RegulatoryAlertsView } from "@/components/views/RegulatoryAlertsView";
 import { useApiHealth } from "@/hooks/useApiHealth";
 import { useAgnesStore } from "@/store/agnesStore";
 
@@ -22,6 +23,7 @@ const TAB_TITLES: Record<TabKey, { title: string; subtitle: string }> = {
   runs: { title: "Pipeline Runs", subtitle: "History and live execution of Agnes' agent pipelines." },
   suppliers: { title: "Supplier Scoring", subtitle: "Rank suppliers by price, lead time, and quality — adjustable weights." },
   alerts: { title: "Price Alerts", subtitle: "Market price changes detected by Agnes — drops are sourcing opportunities, increases are cost risks." },
+  regulatory: { title: "Regulatory Alerts", subtitle: "FDA IID changes affecting portfolio ingredients — proactive compliance risk monitoring." },
 };
 
 const Index = () => {
@@ -100,6 +102,7 @@ const Index = () => {
               : tab === "compliance" ? <ComplianceView />
               : tab === "proposals" ? <ProposalsView />
               : tab === "runs" ? <PipelineRunsView />
+              : tab === "regulatory" ? <RegulatoryAlertsView />
               : <SuppliersView />
             }
           </div>

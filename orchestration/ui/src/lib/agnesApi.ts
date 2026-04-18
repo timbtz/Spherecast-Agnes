@@ -1,6 +1,7 @@
 import type {
   AlertCount,
   ChatResponse,
+  Citation,
   ComplianceProduct,
   DagGraph,
   FdaLimit,
@@ -10,6 +11,8 @@ import type {
   PipelineRun,
   PriceAlert,
   Proposal,
+  Refusal,
+  RegulatoryAlert,
   RunDetail,
   RunEvent,
   ScoredSupplier,
@@ -185,6 +188,18 @@ export const agnesApi = {
 
   async dismissAlert(alertId: number): Promise<{ status: string }> {
     return safeFetch(`/api/alerts/${alertId}/dismiss`, { method: "POST" });
+  },
+
+  async regulatoryAlerts(): Promise<{ alerts: RegulatoryAlert[]; count: number }> {
+    return safeFetch<{ alerts: RegulatoryAlert[]; count: number }>("/api/data/regulatory-alerts", undefined, { alerts: [], count: 0 });
+  },
+
+  async proposalCitations(opportunityId: string): Promise<{ citations: Citation[]; count: number }> {
+    return safeFetch<{ citations: Citation[]; count: number }>(`/api/data/proposals/${opportunityId}/citations`, undefined, { citations: [], count: 0 });
+  },
+
+  async refusals(): Promise<{ refusals: Refusal[]; count: number }> {
+    return safeFetch<{ refusals: Refusal[]; count: number }>("/api/data/refusals", undefined, { refusals: [], count: 0 });
   },
 
   // SSE — caller is responsible for closing

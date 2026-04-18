@@ -39,6 +39,12 @@ def opportunities():
     ]
 
 
+def _normalize_name(name: str | None) -> str:
+    if not name:
+        return ""
+    return name.title() if name.isupper() else name
+
+
 @router.get("/ingredients")
 def ingredients(grade: str | None = Query(default=None)):
     with get_db() as db:
@@ -58,7 +64,16 @@ def ingredients(grade: str | None = Query(default=None)):
             params.append(grade)
         query += " GROUP BY ic.Id ORDER BY ic.Name"
         rows = db.execute(query, params).fetchall()
-    return [dict(r) for r in rows]
+    return [{**dict(r), "display_name": _normalize_name(r["display_name"])} for r in rows]
+
+
+CERT_IMPLICATIONS = {
+    "Vegan": ["Vegetarian"],
+    "Organic": ["NonGMO"],
+    "NSF": ["cGMP"],
+    "InformedSport": ["cGMP"],
+    "USP": ["cGMP"],
+}
 
 
 @router.get("/compliance")
@@ -74,23 +89,39 @@ def compliance():
             ORDER BY c.Name, p.SKU
         """).fetchall()
 
-    # Pivot: one object per product with certifications dict
     products: dict[int, dict] = {}
     for r in rows:
         pid = r["product_id"]
         if pid not in products:
+            sku = r["product_name"] or ""
+            if sku.startswith("FG-"):
+                # Strip source prefix (FG-iherb-, FG-amazon-, FG-thrive-market-, etc.)
+                parts = sku[3:].split("-", 1)
+                product_id_part = parts[1] if len(parts) > 1 else parts[0]
+                display = f"{r['company']} #{product_id_part}"
+            else:
+                display = sku or f"{r['company']} Product {pid}"
             products[pid] = {
                 "product_id": str(pid),
-                "product_name": r["product_name"] or f"Product {pid}",
+                "product_name": display,
                 "company": r["company"],
                 "off_market": bool(r["off_market_warning"]),
                 "certifications": {},
             }
         status = r["status"] or "implied"
-        cert_status = "certified" if status == "confirmed" else "implied"
+        cert_status = "certified" if status == "confirmed" else status if status == "derived" else "implied"
         products[pid]["certifications"][r["cert_type"]] = cert_status
 
-    return list(products.values())
+    for prod in products.values():
+        certs = prod["certifications"]
+        for source_cert, implied_certs in CERT_IMPLICATIONS.items():
+            if source_cert in certs:
+                for implied in implied_certs:
+                    if implied not in certs:
+                        certs[implied] = "derived"
+
+    result = list(products.values())
+    return {"products": result, "count": len(result)}
 
 
 @router.get("/proposals")
@@ -204,3 +235,54 @@ def get_regulatory_alerts():
         })
 
     return {"alerts": list(alerts.values()), "count": len(alerts)}
+
+
+@router.get("/proposals/{opportunity_id}/citations")
+def proposal_citations(opportunity_id: int):
+    try:
+        with get_db() as db:
+            rows = db.execute(
+                """SELECT Id as id, OpportunityId as opportunity_id,
+                          ClaimText as claim_text, SourceType as source_type,
+                          SourceId as source_id, SourceUrl as source_url,
+                          SourceSnippet as source_snippet, Confidence as confidence,
+                          CreatedAt as created_at
+                   FROM Claim_Citation
+                   WHERE OpportunityId = ?
+                   ORDER BY Id""",
+                (opportunity_id,),
+            ).fetchall()
+        return {"opportunity_id": opportunity_id, "citations": [dict(r) for r in rows], "count": len(rows)}
+    except Exception:
+        return {"opportunity_id": opportunity_id, "citations": [], "count": 0}
+
+
+@router.get("/refusals")
+def get_refusals():
+    import json as _json
+    try:
+        with get_db() as db:
+            rows = db.execute(
+                """SELECT Id as id, CanonicalId as canonical_id,
+                          IngredientName as ingredient_name, Decision as decision,
+                          Justification as justification, Confidence as confidence,
+                          BlockingFactors as blocking_factors_raw,
+                          UnblockHint as unblock_hint, CreatedAt as created_at
+                   FROM Refusal_Log
+                   WHERE Decision IN ('refuse', 'refuse_gate_fail', 'refuse_compliance',
+                                       'refuse_low_confidence', 'defer_human_review')
+                   ORDER BY Confidence DESC
+                   LIMIT 100""",
+            ).fetchall()
+        result = []
+        for r in rows:
+            row = dict(r)
+            try:
+                row["blocking_factors"] = _json.loads(row.pop("blocking_factors_raw") or "[]")
+            except (ValueError, TypeError):
+                row["blocking_factors"] = []
+                row.pop("blocking_factors_raw", None)
+            result.append(row)
+        return {"refusals": result, "count": len(result)}
+    except Exception:
+        return {"refusals": [], "count": 0}

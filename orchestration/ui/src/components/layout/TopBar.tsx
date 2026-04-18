@@ -1,3 +1,5 @@
+import { useQuery } from "@tanstack/react-query";
+import { Bell } from "lucide-react";
 import { useApiHealth } from "@/hooks/useApiHealth";
 import { agnesApi } from "@/lib/agnesApi";
 import { SpherecastWordmark } from "@/components/brand/SpherecastMark";
@@ -5,6 +7,14 @@ import { cn } from "@/lib/utils";
 
 export function TopBar() {
   const { apiOnline, mode, toggleMode } = useApiHealth();
+  const { data: alertData } = useQuery({
+    queryKey: ["alert-count"],
+    queryFn: () => agnesApi.alertCount(),
+    refetchInterval: 60_000,
+    enabled: apiOnline,
+  });
+  const alertCount = alertData?.count ?? 0;
+
   return (
     <header className="h-12 shrink-0 border-b border-border flex items-center justify-between px-5 bg-background/80 backdrop-blur-sm relative z-20">
       <div className="flex items-center gap-2.5">
@@ -14,6 +24,15 @@ export function TopBar() {
       </div>
 
       <div className="flex items-center gap-3">
+        {alertCount > 0 && (
+          <div className="relative">
+            <Bell className="size-4 text-muted-foreground animate-status-pulse" strokeWidth={2} />
+            <span className="absolute -top-1.5 -right-1.5 size-4 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center leading-none">
+              {alertCount > 9 ? "9+" : alertCount}
+            </span>
+          </div>
+        )}
+
         <button
           onClick={toggleMode}
           className={cn(

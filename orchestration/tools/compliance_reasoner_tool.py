@@ -118,6 +118,38 @@ def run(ctx: AgnesContext) -> dict:
     except Exception as e:
         logger.warning(f"FDA IID lookup failed for canonical {canonical_id}: {e}")
 
+    # Persist refuse/defer decisions to Refusal_Log for UI visibility
+    if outcome in ("refuse", "human-review") or not above_floor:
+        decision_label = (
+            "refuse" if outcome == "refuse" else
+            "defer_human_review" if outcome == "human-review" else
+            "refuse_low_confidence"
+        )
+        try:
+            wconn = sqlite3.connect(str(ctx.enriched_db_path))
+            justification = (comp_result.result or {}).get("reason", "Compliance check failed")
+            blocking = []
+            if outcome == "refuse":
+                blocking.append("compliance_refuse")
+            if not above_floor:
+                blocking.append(f"low_confidence:{comp_confidence:.2f}")
+            wconn.execute(
+                """INSERT OR IGNORE INTO Refusal_Log
+                   (CanonicalId, IngredientName, Decision, Justification,
+                    Confidence, BlockingFactors, UnblockHint, RunId)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (
+                    canonical_id, ingredient_name, decision_label, justification,
+                    comp_confidence, str(blocking),
+                    "Provide missing compliance data or run with updated certifications.",
+                    getattr(ctx, "run_id", None),
+                )
+            )
+            wconn.commit()
+            wconn.close()
+        except Exception as persist_err:
+            logger.warning(f"Refusal persistence failed: {persist_err}")
+
     return {
         "outcome": outcome,
         "compound_confidence": comp_confidence,

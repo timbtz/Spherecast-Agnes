@@ -6,9 +6,12 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
+from dotenv import load_dotenv
+load_dotenv()
+
 ROOT = Path(__file__).parent.parent
 ENRICHED_DB = ROOT / "db_enriched.sqlite"
-MIN_SCORE_THRESHOLD = 0.30
+MIN_SCORE_THRESHOLD = 0.05
 MIN_COMPANY_COUNT = 2
 TARGET_PROPOSAL_COUNT = 50
 
@@ -35,6 +38,7 @@ class ProposalGenerator:
             context = self._build_context(opp)
             proposal = self._generate_proposal(client, context, opp)
             self._store_proposal(opp["id"], proposal)
+            self._extract_and_store_citations(client, opp["id"], proposal)
 
         logger.info(f"Generated {len(opportunities)} proposals.")
         self._write_markdown_report()
@@ -215,6 +219,67 @@ Output a JSON object with these fields:
         conn.commit()
         conn.close()
 
+    def _extract_and_store_citations(self, client, opportunity_id: int, proposal: dict) -> None:
+        """Post-process: extract claims from proposal narrative and match to DB sources."""
+        import anthropic  # noqa: F401 — already imported in run()
+        narrative = proposal.get("proposal_narrative", "")
+        sources = proposal.get("sources", [])
+        if not narrative:
+            return
+
+        extraction_prompt = f"""Extract verifiable claims from this procurement proposal and map each claim to a source.
+
+PROPOSAL:
+{narrative}
+
+CONTEXT SOURCES AVAILABLE: {sources}
+
+Return a JSON array of citations. Each element:
+{{
+  "claim_text": "exact short claim from proposal",
+  "source_type": "fda_iid|pubchem|dsld|supplier|openfda|compliance",
+  "source_id": "row ID or external identifier if known, else null",
+  "source_snippet": "brief excerpt or data point that supports this claim",
+  "confidence": 0.0-1.0
+}}
+
+Return only the JSON array, no other text. Maximum 8 citations."""
+
+        try:
+            response = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=1000,
+                messages=[{"role": "user", "content": extraction_prompt}],
+            )
+            raw = response.content[0].text.strip()
+            if "```json" in raw:
+                raw = raw.split("```json")[1].split("```")[0].strip()
+            elif "```" in raw:
+                raw = raw.split("```")[1].split("```")[0].strip()
+            citations = json.loads(raw)
+            if not isinstance(citations, list):
+                return
+            conn = sqlite3.connect(self.db_path)
+            for cit in citations[:8]:
+                conn.execute(
+                    """INSERT INTO Claim_Citation
+                       (OpportunityId, ClaimText, SourceType, SourceId, SourceSnippet, Confidence)
+                       VALUES (?,?,?,?,?,?)""",
+                    (
+                        opportunity_id,
+                        cit.get("claim_text", "")[:500],
+                        cit.get("source_type", "unknown"),
+                        str(cit.get("source_id")) if cit.get("source_id") else None,
+                        cit.get("source_snippet", "")[:500],
+                        float(cit.get("confidence", 0.7)),
+                    )
+                )
+            conn.commit()
+            conn.close()
+            logger.info(f"Stored {len(citations)} citations for opportunity {opportunity_id}")
+        except Exception as e:
+            logger.warning(f"Citation extraction failed for opportunity {opportunity_id}: {e}")
+
     def _write_markdown_report(self) -> None:
         conn = sqlite3.connect(self.db_path)
         proposals = conn.execute(
@@ -237,3 +302,8 @@ Output a JSON object with these fields:
         report_path = ROOT / "proposals.md"
         report_path.write_text("\n".join(lines))
         logger.info(f"Proposals written to {report_path}")
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    ProposalGenerator().run()

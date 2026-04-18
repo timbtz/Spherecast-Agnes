@@ -46,7 +46,7 @@
 | Phase 1 — Ingredient Identity | ✅ Complete | CID gap backfill: 20 new CIDs via UNII/name lookup; 2nd dedup pass merged 7 more pairs; dedup merge bug fixed |
 | Phase 2 — BOM Quantities | ✅ Complete | 515 rows, 87/149 FG covered (58%); fingerprint match: brand+ingredient query + overlap≥2 |
 | Phase 3 — Commercial/Compliance | ✅ Complete | 126 rows, 66 products, 9 cert types; fixed stmt.notes key + Phase 2 label reuse |
-| Phase 4 — Reasoning/Proposals | ⏳ Proposals still need running | 123 CO rows scored; ANTHROPIC_API_KEY set — run `reasoning/proposal_generator.py` to populate Proposal_Text; substitution edges=32; Function column fully populated (0 NULL) |
+| Phase 4 — Reasoning/Proposals | ✅ Complete | 14 proposals generated + 112 citations extracted (Haiku); 4 demo trap refusals seeded; `reasoning/proposal_generator.py` now loads .env |
 | Phase A — Data Quality Fixes | ✅ Complete | Grade_Flag: 239/250 classified (11 unknown); substitution edges: 4→32 (fuzzy fallback added); compliance status filter fixed; Function column populated via role_classifier |
 | `enrichment/sources/pubchem.py` | ✅ Implemented | get_isomeric_smiles() + get_unii_from_synonyms() + get_cid_by_name(); rate-limited (4.5 req/sec), cache-first |
 | `enrichment/sources/dsld.py` | ✅ Implemented | DSLD v9, cached |
@@ -72,11 +72,15 @@
 | `orchestration/agents/price_fetch_agent.py` | ✅ New | Async DAG agent; fetches prices via search_sub_agent; writes Price_Change_Alert on >=15% change |
 | `orchestration/agents/price_alert_writer.py` | ✅ New | Async DAG agent; Gemini narrative; persists to Price_Change_Alert.Alert_Narrative |
 | `orchestration/api/routes/alerts.py` | ✅ New | GET count/list, POST dismiss, GET per-ingredient |
+| `orchestration/api/routes/data.py` | ✅ Updated | Product name fallback (company #id), title-case fix, CERT_IMPLICATIONS hierarchy, GET /proposals/{id}/citations, GET /refusals |
 | `reasoning/supplier_scorer.py` | ✅ Complete + score_suppliers_with_context() | Returns grade guidelines alongside ranked supplier list |
 | `reasoning/supplier_guidelines.py` | ✅ New | Reads Orchestration/Data/supplier_wiki/{grade}.md for scoring context |
 | `Orchestration/Data/supplier_wiki/` | ✅ New | supplements.md, excipients.md, food.md — price ranges, quality flags, lead time norms |
 | `orchestration/api/routes/scoring.py` | ✅ Complete | GET/POST /api/scoring/weights, GET /api/scoring/suppliers/{id} |
-| `orchestration/tools/compliance_reasoner_tool.py` | ✅ Augmented | Now returns fda_iid_max_daily_mg, fda_iid_routes, fda_iid_data_available after ComplianceReasoner |
+| `orchestration/tools/compliance_reasoner_tool.py` | ✅ Augmented | Returns fda_iid_max_daily_mg, fda_iid_routes; persists refuse/defer to Refusal_Log |
+| `enrichment/db_migrate_citation_refusal.py` | ✅ Complete + run | Claim_Citation + Refusal_Log tables; 4 demo trap seeds; idempotent |
+| `orchestration/ui/src/components/views/RegulatoryAlertsView.tsx` | ✅ New | Severity-filtered alert cards with before/after MDE snapshots |
+| `orchestration/ui/src/hooks/usePriceAlerts.ts` | ✅ New | `usePriceAlertCount()` — polls /api/alerts/count every 60s |
 | `enrichment/sources/rxnorm.py` | ❌ Missing | Low priority — narrow use (drug-class ingredients only) |
 | `enrichment/sources/fdc.py` | ❌ Missing | Low priority — only useful for ~5 food-macro SKUs |
 | `reasoning/consolidation_scorer.py` | ✅ Fixed + run | Formula: company×0.40 + bom×0.25 + fragmentation×0.20 + supplier_spread×0.15; 129 rows scored |

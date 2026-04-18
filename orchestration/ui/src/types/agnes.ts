@@ -35,7 +35,7 @@ export interface Proposal {
   created_at: string;
 }
 
-export type CertStatus = "certified" | "implied" | "none";
+export type CertStatus = "certified" | "implied" | "derived" | "none";
 export interface ComplianceProduct {
   product_id: string;
   product_name: string;
@@ -157,4 +157,48 @@ export interface PriceAlert {
 
 export interface AlertCount {
   count: number;
+}
+
+export interface RegulatoryAlert {
+  change_id: number;
+  ingredient_name: string;
+  status: string;
+  route: string | null;
+  dosage_form: string | null;
+  canonical_id: string;
+  grade: string | null;
+  opportunity_id: string | null;
+  consolidation_score: number | null;
+  regulatory_drift_flag: boolean;
+  regulatory_drift_reason: string | null;
+  snapshots: Array<{
+    snapshot_date: string;
+    max_potency: number | null;
+    max_daily_exposure: number | null;
+    mde_uom: string | null;
+  }>;
+}
+
+export interface Citation {
+  id: number;
+  opportunity_id: number;
+  claim_text: string;
+  source_type: string;
+  source_id: string | null;
+  source_url: string | null;
+  source_snippet: string | null;
+  confidence: number | null;
+  created_at: string;
+}
+
+export interface Refusal {
+  id: number;
+  canonical_id: number;
+  ingredient_name: string;
+  decision: string;
+  justification: string;
+  confidence: number;
+  blocking_factors: string[];
+  unblock_hint: string;
+  created_at: string;
 }
