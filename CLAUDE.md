@@ -13,7 +13,8 @@
 | Phase 1 — Ingredient Identity | ✅ Complete | CID gap backfill: 20 new CIDs via UNII/name lookup; 2nd dedup pass merged 7 more pairs; dedup merge bug fixed |
 | Phase 2 — BOM Quantities | ✅ Complete | 515 rows, 87/149 FG covered (58%); fingerprint match: brand+ingredient query + overlap≥2 |
 | Phase 3 — Commercial/Compliance | ✅ Complete | 126 rows, 66 products, 9 cert types; fixed stmt.notes key + Phase 2 label reuse |
-| Phase 4 — Reasoning/Proposals | ⏳ Scorer ✅ formula fixed, proposals blocked | 123 CO rows; correct formula (fragmentation+supplier_spread); proposals need ANTHROPIC_API_KEY |
+| Phase 4 — Reasoning/Proposals | ⏳ Phase A fixes done, proposals blocked | 123 CO rows; scorer correct; proposals need ANTHROPIC_API_KEY; Grade_Flag populated, substitution edges=30, compliance filter fixed |
+| Phase A — Data Quality Fixes | ✅ Complete | Grade_Flag: 239/250 classified (11 unknown); substitution edges: 4→30; compliance status filter fixed ('implied' added); proposals TARGET=50 |
 | `enrichment/sources/pubchem.py` | ✅ Implemented | get_isomeric_smiles() + get_unii_from_synonyms() + get_cid_by_name(); rate-limited (4.5 req/sec), cache-first |
 | `enrichment/sources/dsld.py` | ✅ Implemented | DSLD v9, cached |
 | `enrichment/sources/molport.py` | ✅ Stub | Graceful no-op if MOLPORT_API_KEY absent; CAS→SMILES→supplier chain |
@@ -23,7 +24,9 @@
 | `enrichment/sources/rxnorm.py` | ❌ Missing | Low priority — narrow use (drug-class ingredients only) |
 | `enrichment/sources/fdc.py` | ❌ Missing | Low priority — only useful for ~5 food-macro SKUs |
 | `reasoning/consolidation_scorer.py` | ✅ Fixed + run | Formula: company×0.40 + bom×0.25 + fragmentation×0.20 + supplier_spread×0.15; 129 rows scored |
-| `reasoning/substitution_graph.py` | ✅ Run | 4 edges from 2/40 rules; 38 rules skipped due to canonical name mismatch |
+| `reasoning/substitution_graph.py` | ✅ Re-run | 30 edges (18 rules); fix_substitution_rules.py updated 20 Name_A/B aliases; 18 still unresolved (no canonical match) |
+| `enrichment/enrichers/grade_classifier.py` | ✅ New + run | Heuristic classifier; 239/250 classified; supplement:117, food:62, excipient:32, sweetener:15, flavor:13, unknown:11 |
+| `scripts/fix_substitution_rules.py` | ✅ New + run | Alias-table UPDATE for Ingredient_Substitution_Rule; 20 updated, 2 already-correct, 18 unresolved |
 | `enrichment/enrichers/commercial_enricher.py` | ✅ _enrich_pair wired | MolportClient integration complete; no-ops when MOLPORT_API_KEY absent |
 
 ---
@@ -76,7 +79,11 @@ Fields to add per PRD §7:
 
 **[DESIGN DECISION]** Consolidation scoring: Option C chosen (formula baseline + LLM adjustment ±0.10 for top-50 only). Formula weights: company_score 0.40, bom_score 0.25, fragmentation 0.20, supplier_spread 0.15.
 
-**[KNOWN LIMIT]** SubstitutionGraphBuilder: 38/40 rules skip due to canonical name mismatch (e.g. rule uses "Cholecalciferol" but canonical is stored as "Vitamin D"). Rules use COLLATE NOCASE exact match. Fix: update Ingredient_Substitution_Rule.Name_A/B to match Ingredient_Canonical.Name exactly.
+**[FIXED]** SubstitutionGraphBuilder: `scripts/fix_substitution_rules.py` updated 20 Name_A/B aliases (e.g. Cholecalciferol→Vitamin D, Ascorbic Acid→Vitamin C). Edges: 4→30. 18 rules still unresolved (no canonical match — Ergocalciferol, Methylcobalamin, Fish Oil, etc.).
+
+**[FIXED]** `proposal_generator.py` compliance filter: added `'implied'` to Status IN clause (all 126 compliance rows use `'implied'`). Vitamin C now returns 8 certs in context. Grade_Flag and SMILES added to opportunity fetch and prompt.
+
+**[NEW]** `enrichment/enrichers/grade_classifier.py`: heuristic no-API classifier populates Grade_Flag for 239/250 canonicals. Unknown=11 (branded blends: Aquamin, EpiCor, ConcenTrace, etc. — acceptable).
 
 **[FIXED]** UNII backfill: PubChem synonym extraction (`get_unii_from_synonyms()`) replaced DSLD path. 88/90 CID-bearing canonicals populated. UNII coverage: 44→129 (17%→50.2%). DSLD UNII backfill deprecated for this dataset (DSLD has sparse uniiCode on excipients/trade-name ingredients).
 

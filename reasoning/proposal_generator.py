@@ -10,7 +10,7 @@ ROOT = Path(__file__).parent.parent
 ENRICHED_DB = ROOT / "db_enriched.sqlite"
 MIN_SCORE_THRESHOLD = 0.30
 MIN_COMPANY_COUNT = 2
-TARGET_PROPOSAL_COUNT = 10
+TARGET_PROPOSAL_COUNT = 50
 
 logger = logging.getLogger("agnes.proposal_generator")
 
@@ -22,7 +22,11 @@ class ProposalGenerator:
     def run(self) -> None:
         import anthropic
 
-        client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            logger.error("ANTHROPIC_API_KEY not set — proposal generation requires this key. Exiting.")
+            return
+        client = anthropic.Anthropic(api_key=api_key)
         opportunities = self._get_top_opportunities()
 
         logger.info(f"Generating proposals for {len(opportunities)} opportunities")
@@ -40,7 +44,8 @@ class ProposalGenerator:
         rows = conn.execute(
             """SELECT co.Id, ic.Name, ic.CAS_Number, ic.Function,
                       co.Company_Count, co.BOM_Count, co.Current_Supplier_Count,
-                      co.Consolidation_Score, co.Recommended_SupplierId, s.Name AS SupplierName
+                      co.Consolidation_Score, co.Recommended_SupplierId, s.Name AS SupplierName,
+                      ic.Grade_Flag, ic.SMILES
                FROM Consolidation_Opportunity co
                JOIN Ingredient_Canonical ic ON ic.Id = co.CanonicalIngredientId
                LEFT JOIN Supplier s ON s.Id = co.Recommended_SupplierId
@@ -59,6 +64,7 @@ class ProposalGenerator:
                 "function": r[3], "company_count": r[4], "bom_count": r[5],
                 "supplier_count": r[6], "score": r[7],
                 "recommended_supplier_id": r[8], "recommended_supplier_name": r[9],
+                "grade": r[10], "smiles": r[11],
             }
             for r in rows
         ]
@@ -108,7 +114,7 @@ class ProposalGenerator:
                JOIN SKU_To_Canonical stc ON stc.ProductId = bc.ConsumedProductId
                JOIN Ingredient_Canonical ic ON ic.Id = stc.CanonicalId
                WHERE ic.Name = ? COLLATE NOCASE
-                 AND pc.Status IN ('confirmed', 'claimed')""",
+                 AND pc.Status IN ('confirmed', 'claimed', 'implied')""",
             (opp["ingredient_name"],),
         ).fetchall()
 
@@ -124,6 +130,8 @@ class ProposalGenerator:
             "compliance_requirements": [
                 {"certification": r[0], "status": r[1]} for r in compliance
             ],
+            "grade": opp.get("grade", "unknown"),
+            "smiles_available": opp.get("smiles") is not None,
         }
 
     def _generate_proposal(self, client, context: dict, opp: dict) -> dict:
@@ -137,6 +145,7 @@ Never invent CAS numbers, certifications, or pricing data — only use what is p
 INGREDIENT DATA:
 - CAS Number: {opp.get('cas_number', 'Not confirmed')}
 - Function: {opp.get('function', 'Unknown')}
+- Grade: {opp.get('grade', 'unknown')}
 - Companies purchasing independently: {opp['company_count']} ({', '.join(context['companies'][:10])})
 - Current suppliers: {opp['supplier_count']} ({', '.join(context['current_suppliers'][:5])})
 - BOMs containing this ingredient: {opp['bom_count']}
@@ -186,17 +195,20 @@ Output a JSON object with these fields:
             return {"proposal_narrative": raw, "confidence_score": 0.5, "sources": ["llm"]}
 
     def _store_proposal(self, opportunity_id: int, proposal: dict) -> None:
+        llm_adjustment = max(-0.10, min(0.10, proposal.get("llm_adjustment", 0.0)))
         conn = sqlite3.connect(self.db_path)
         conn.execute(
             """UPDATE Consolidation_Opportunity
                SET Proposal_Text = ?, Proposal_JSON = ?,
-                   Compliance_Gap = ?, Generated_At = ?
+                   Compliance_Gap = ?, Generated_At = ?,
+                   Score_LLM_Adjustment = ?
                WHERE Id = ?""",
             (
                 proposal.get("proposal_narrative", ""),
                 json.dumps(proposal),
                 json.dumps(proposal.get("data_gaps", [])),
                 datetime.utcnow().isoformat(),
+                llm_adjustment,
                 opportunity_id,
             ),
         )
