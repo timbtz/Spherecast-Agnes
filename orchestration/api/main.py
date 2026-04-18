@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from orchestration.api import db as _db
-from orchestration.api.routes import chat, pipelines, data_update
+from orchestration.api.routes import chat, pipelines, data_update, data
 
 _DB_PATH = Path(__file__).parent.parent.parent / "orchestration.db"
 
@@ -31,16 +31,19 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*", "Last-Event-ID"],
 )
 
 app.include_router(chat.router)
 app.include_router(pipelines.router)
 app.include_router(data_update.router)
+app.include_router(data.router)
 
-_UI_DIR = Path(__file__).parent.parent / "ui"
-if _UI_DIR.exists():
-    app.mount("/ui", StaticFiles(directory=str(_UI_DIR), html=True), name="ui")
+_UI_DIST = Path(__file__).parent.parent / "ui" / "dist"
+_UI_DEV = Path(__file__).parent.parent / "ui"
+_SERVE = _UI_DIST if _UI_DIST.exists() else _UI_DEV
+if _SERVE.exists():
+    app.mount("/ui", StaticFiles(directory=str(_SERVE), html=True), name="ui")
 
 
 @app.get("/health")
