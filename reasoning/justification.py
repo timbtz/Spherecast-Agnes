@@ -53,12 +53,17 @@ def render(
     lines.append("**Substitution gates**")
     notes = gate_result.get("notes", {})
     confs = gate_result.get("per_gate_confidence", {})
+    failed = gate_result.get("failed_gate")
     for gate_key, label in GATE_LABELS.items():
         note = notes.get(gate_key, "—")
         conf = confs.get(gate_key, 0.0)
-        marker = "✓" if "ok" in note or "match" in note or "approved" in note else "✗"
+        # Pass/fail is driven by confidence — passing gates sit at 0.95+
+        # and failures at ~0.10-0.45. This avoids keyword-matching quirks
+        # like `smiles_exact` (passes but has no "ok"/"match" substring)
+        # or `no_canonical_match` (fails but contains "match").
+        passed = (gate_key != failed) and (conf >= 0.60)
+        marker = "✓" if passed else "✗"
         lines.append(f"- {marker} {label}: `{note}` ({_fmt_pct(conf)})")
-    failed = gate_result.get("failed_gate")
     if failed:
         lines.append(f"- **First gate failure:** `{failed}`")
     lines.append("")
