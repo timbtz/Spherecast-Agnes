@@ -44,41 +44,43 @@ Spherecast-Agnes/                       # (branch: phase-4)
 ├── README-phase-4.md          THIS FILE — phase-4 branch walkthrough
 ├── requirements.txt
 │
-├── Orchestration/             DOCS (capital O) — PRDs, plans, wiki, refs
-│   ├── PRDs/                  meta-workflow.md, PRD.md, SQLBackendPRD.md
-│   ├── Plans/                 Step-by-step execution plans
-│   ├── References/            One *-guide.md per API / tool
+├── Orchestration/             Mixed: PRD docs + Stage-3 code (capital O)
+│   ├── __init__.py
+│   ├── planner.py             Planner / critic double-pass loop
+│   ├── tool_runtime.py        Typed-tool dispatcher (ToolResult contract)
+│   ├── qualify_candidate.py   Scout → enrichment → compliance → Q·C·L·R
+│   ├── rfq.py                 draft_rfq + send_rfq (simulated responses)
+│   ├── demo_real.py           End-to-end anchor-case runner
+│   ├── sims/
+│   │   ├── anchor_case.py     Magnesium-stearate worked case (demo spine)
+│   │   ├── sim_runners.py     Sim #1/#2/#3/#5/#8 runners
+│   │   └── stress_injector.py Fallout scenarios (supplier / price / lane)
+│   ├── PRDs/                  PRD-ReasoningScaffold.md (+ others on master)
+│   ├── Plans/                 Step-by-step execution plans (on master)
+│   ├── References/            One *-guide.md per API / tool (on master)
 │   ├── Wiki/                  LLM-maintained reasoning pages (Stage 3+)
 │   └── Data/                  llm-wiki.md reference, Spherecast context
 │
-├── orchestration/             CODE (lowercase o) — Stage 3 agents
-│   ├── __init__.py
-│   ├── agents/
-│   │   ├── router_agent.py          top-level dispatcher
-│   │   ├── proactive_agent.py       consolidation ranking runner
-│   │   ├── reactive_agent.py        supplier-fallout → alternative
-│   │   ├── research_agent.py        net-new supplier discovery
-│   │   ├── proposal_writer.py       final proposal text generation
-│   │   ├── search_sub_agent.py      Google ADK web search wrapper
-│   │   └── _adk_runner.py           ADK session / runner helper
-│   ├── api/                   FastAPI (or equivalent) endpoint layer
-│   ├── pipelines/             DAG definitions wiring agents together
-│   ├── schema/                pydantic / JSON schemas for tool I/O
-│   ├── tools/                 MCP-style tool fns the agents call
-│   └── ui/                    Stage 4 frontend (placeholder)
-│
-├── enrichment/                Stage 2 pipeline (owned on master)
+├── enrichment/                Stage-2 pipeline (largely on master)
 │   ├── pipeline.py            Entry: python pipeline.py --phase 1|2|3
 │   ├── db_bootstrap.py        Clone db.sqlite → db_enriched.sqlite
-│   ├── db_migrate_v11.py      v1.1 migration (idempotent)
+│   ├── db_migrate_v11.py      v1.1 migration
+│   ├── db_migrate_v12.py      v1.2 additive migration (reasoning tables)
 │   ├── backfill_phase1.py
 │   ├── run_dedup.py
-│   ├── sources/               pubchem.py, dsld.py, molport.py, …
+│   ├── sources/               pubchem.py, dsld.py, molport.py
 │   ├── normalizers/           ingredient_normalizer, fuzzy_matcher
 │   ├── parsers/               sku_parser.py
-│   └── enrichers/             quantity, commercial, compliance
+│   ├── enrichers/             quantity, commercial, compliance
+│   ├── scout/                 NEW — Scout Worker (ships in Clean-4)
+│   │   ├── scout.py           Coverage-gap + single-source candidate pull
+│   │   └── directories.py     Public directory source registry
+│   └── logistics/             NEW — Logistics tools (ship in Clean-4)
+│       ├── map_logistics.py   Geo / port / mode mix
+│       └── compute_lane_cost.py  Lane cost + risk multiplier
 │
-├── reasoning/                 Stage 2 Phase 4 + substitution engine
+├── reasoning/                 Stage-2 Phase-4 + substitution engine
+│   ├── base.py                   Tool / ToolResult contract + compound_confidence
 │   ├── consolidation_scorer.py   Formula: C·0.40 + B·0.25 + F·0.20 + S·0.15
 │   ├── substitution_graph.py     Builds ingredient equivalence edges
 │   ├── proposal_generator.py     Claude-adjusted proposal text
@@ -86,7 +88,10 @@ Spherecast-Agnes/                       # (branch: phase-4)
 │   │                             grade/morphology/regulatory)
 │   ├── compliance_reasoner.py    4-state dual-rule compliance outcomes
 │   ├── refusal_engine.py         Hard 0.60 confidence floor
-│   └── qualify_candidate.py      ToolResult wrapper + evidence ledger hook
+│   ├── supplier_scorer.py        Q·C·L·R explainable score
+│   ├── role_inferrer.py          Role inference (lubricant/binder/etc.)
+│   ├── evidence_ledger.py        Append-only claim ledger
+│   └── justification.py          NL justification template
 │
 ├── schema/
 │   └── enriched_schema.sql    v1.1 locked (v1.2 additive migration pending)
@@ -102,8 +107,11 @@ Spherecast-Agnes/                       # (branch: phase-4)
     └── demo-results.md            Real-data run across top-4 opportunities
 ```
 
-> **Rule of thumb.** `Orchestration/` (capital O) = docs. `orchestration/`
-> (lowercase o) = code. Tim set this convention on master; phase-4 now follows it.
+> **Note on layout.** `Orchestration/` (capital O) is intentionally mixed:
+> it carries both the Stage-3 planner / tool-runtime / sims code and the
+> PRDs / plans / references docs. If we want to split to `orchestration/`
+> (lowercase code) vs `Orchestration/` (docs) later we can, but the current
+> mix reflects how phase-4 actually evolved and keeps the diff shallow.
 
 ---
 
@@ -150,11 +158,16 @@ python enrichment/pipeline.py --phase 3
 python reasoning/consolidation_scorer.py
 ```
 
-### Run a Stage-3 agent (ADK)
+### Run the anchor case end-to-end
 ```bash
-python -m orchestration.agents._adk_runner --agent proactive
-# or
-python -m orchestration.agents._adk_runner --agent reactive --supplier-id <id>
+python -m Orchestration.demo_real
+# magnesium-stearate worked case; writes results + evidence ledger rows
+```
+
+### Run a specific sim
+```bash
+python -m Orchestration.sims.sim_runners --sim 3   # compliance trap (hallucination control)
+python -m Orchestration.sims.sim_runners --sim 1   # fragmentation detection
 ```
 
 ### Validate the reasoning scaffold
@@ -167,16 +180,17 @@ python -m reasoning.gate_engine --run-scenarios
 
 ## Where to pick up next (as of this reorg)
 
-1. **Wire `qualify_candidate.py` against real `db_enriched.sqlite`** rather than
-   the stub fixture — it's currently returning mocked rows.
-2. **Finish `orchestration/agents/router_agent.py`** — the dispatcher that
-   picks reactive vs proactive vs research based on the trigger payload.
-3. **Extend the jurisdiction packs** in `reasoning/compliance_reasoner.py`
+1. **Wire `Orchestration/qualify_candidate.py` against real `db_enriched.sqlite`**
+   rather than the stub fixture — it's currently returning mocked rows.
+2. **Extend the jurisdiction packs** in `reasoning/compliance_reasoner.py`
    (currently US + EU; Playbook asks for at least CA and JP before demo).
-4. **Open the PR from `phase-4` → `master`** once the above are green.
-   The merge should now be conflict-free because phase-4 has been
-   aligned to Tim's layout.
-5. **Rotate `.env`** — the old committed copy is now in git history; any
+3. **Ship a Red-Team one-shot** — generate trick cases (expired certs, wrong-facility
+   certs, look-alike names) and log failures to the case library.
+4. **Turn `Orchestration/sims/anchor_case.py` into a runnable 3-minute demo spine**
+   (magnesium-stearate, Playbook §4).
+5. **Start the refusal panel + ledger-timeline UI** — the two highest-leverage
+   UI screens per the cut list in Playbook §6.
+6. **Rotate `.env`** — the old committed copy is in phase-4 git history; any
    keys that were in it should be considered exposed and replaced.
 
 ---

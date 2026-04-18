@@ -15,9 +15,20 @@ Clean-4-upload/
 ├── READ-THIS-FIRST.md                              ← do NOT upload
 ├── README-phase-4.md                               ← upload
 ├── .gitignore                                      ← upload
-├── Orchestration/
+├── Orchestration/                                  ← upload (mixed: PRD + code)
+│   ├── __init__.py
+│   ├── planner.py                                  (planner / critic loop)
+│   ├── tool_runtime.py                             (typed-tool dispatcher)
+│   ├── qualify_candidate.py                        (scout → qualify end-to-end)
+│   ├── rfq.py                                      (draft_rfq + send_rfq)
+│   ├── demo_real.py                                (anchor-case runner)
+│   ├── sims/
+│   │   ├── __init__.py
+│   │   ├── anchor_case.py                          (magnesium-stearate worked case)
+│   │   ├── sim_runners.py                          (Sim #1/#2/#3/#5/#8)
+│   │   └── stress_injector.py                      (fallout scenarios)
 │   └── PRDs/
-│       └── PRD-ReasoningScaffold.md                ← upload
+│       └── PRD-ReasoningScaffold.md
 ├── reasoning/                                      ← upload (12 .py files)
 │   ├── __init__.py
 │   ├── base.py
@@ -31,6 +42,15 @@ Clean-4-upload/
 │   ├── role_inferrer.py
 │   ├── substitution_graph.py
 │   └── supplier_scorer.py
+├── enrichment/                                     ← upload (new subfolders only)
+│   ├── scout/
+│   │   ├── __init__.py
+│   │   ├── scout.py                                (Scout Worker)
+│   │   └── directories.py                          (public directory sources)
+│   └── logistics/
+│       ├── __init__.py
+│       ├── map_logistics.py                        (geo / port / mode mix)
+│       └── compute_lane_cost.py                    (lane cost + risk)
 └── docs/                                           ← upload (6 .md files)
     ├── phase4-package-readme.md
     ├── integration-handoff.md
@@ -40,7 +60,7 @@ Clean-4-upload/
     └── demo-results.md
 ```
 
-Total: **21 files**, about **204 KB**.
+Total: **33 files**, about **282 KB**. Clean-4 now contains the full scaffold surface — reasoning gates, orchestration (planner, tool runtime, qualify, RFQ, sims), and enrichment (scout, logistics) — so phase-4 can be deleted safely after the PR merges.
 
 ---
 
@@ -64,8 +84,9 @@ not `phase-4`).
 3. Select everything **except `READ-THIS-FIRST.md`**:
    - `README-phase-4.md`
    - `.gitignore`
-   - `Orchestration/` (folder)
-   - `reasoning/` (folder)
+   - `Orchestration/` (folder — PRDs/ + planner + tool_runtime + qualify_candidate + rfq + demo_real + sims/)
+   - `reasoning/` (folder — 12 .py files)
+   - `enrichment/` (folder — scout/ + logistics/ subfolders only)
    - `docs/` (folder)
 4. Drag the selection onto the GitHub upload area. GitHub preserves the
    folder structure — subfolders and all.
