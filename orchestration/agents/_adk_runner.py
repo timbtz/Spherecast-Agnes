@@ -3,7 +3,6 @@ import os
 
 from google.adk.agents import LlmAgent
 from google.adk.runners import InMemoryRunner
-from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
 
@@ -11,9 +10,8 @@ async def run_adk_agent(agent: LlmAgent, payload: str, run_id: str) -> str:
     """Run one ADK LlmAgent as a single DAG node. Returns final text output."""
     if not os.environ.get("GOOGLE_API_KEY"):
         return ""
-    session_service = InMemorySessionService()
-    runner = InMemoryRunner(agent=agent, app_name=agent.name, session_service=session_service)
-    session = await session_service.create_session(app_name=agent.name, user_id=run_id)
+    runner = InMemoryRunner(agent=agent, app_name=agent.name)
+    session = await runner.session_service.create_session(app_name=agent.name, user_id=run_id)
     final = ""
     async for event in runner.run_async(
         user_id=run_id,
