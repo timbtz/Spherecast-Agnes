@@ -233,6 +233,7 @@ class GateEngine(Tool):
                 "failed_gate": first_failure,
                 "notes": notes,
                 "per_gate_confidence": {n: c for (n, _), c in zip(chain, confidences)},
+                "per_gate_passed": {name: bool(out.passed) for name, out in chain},
             },
             confidence=cc,
             evidence_ids=list(evidence_ids or []),

@@ -61,6 +61,10 @@ ROLE_RULES: dict = {
     # Minerals / actives
     "magnesium oxide": "mineral-fortificant",
     "magnesium citrate": "mineral-fortificant",
+    "magnesium stearate": "lubricant",  # primary role in tabletting; see MULTI_ROLE below
+    "vegetable magnesium stearate": "lubricant",
+    "calcium stearate": "lubricant",
+    "stearic acid": "lubricant",
     "zinc gluconate": "mineral-fortificant",
     "calcium carbonate": "mineral-fortificant",
     # Vitamins
@@ -83,6 +87,15 @@ MULTI_ROLE_MOLECULES: dict = {
     "citric acid": {"acidulant", "chelator", "preservative-aid"},
     "lecithin": {"emulsifier", "antioxidant"},
     "alpha-tocopherol": {"antioxidant", "vitamin-fortificant"},
+    # Magnesium stearate: the playbook §4 worked case. Primary role is
+    # lubricant (tabletting), but it also contributes magnesium — this
+    # matters because stearic acid can cover the lubricant role but NOT
+    # the magnesium source. The role gate uses the multi-role set to
+    # detect partial substitutes that need human review.
+    "magnesium stearate": {"lubricant", "mineral-fortificant"},
+    "vegetable magnesium stearate": {"lubricant", "mineral-fortificant"},
+    # Calcium stearate covers lubricant but swaps the mineral (Ca vs Mg).
+    "calcium stearate": {"lubricant", "mineral-fortificant"},
 }
 
 
@@ -125,3 +138,84 @@ def roles_for(name: str) -> Set[str]:
     if key in ROLE_RULES:
         return {ROLE_RULES[key]}
     return {"unknown"}
+
+
+def covers_roles(candidate_name: str, incumbent_name: str) -> Set[str]:
+    """Return the set of incumbent roles the candidate does NOT cover.
+
+    Empty set means the candidate is a full role-equivalent of the
+    incumbent. Non-empty means it's a partial substitute — the caller
+    should fork / defer to human review.
+
+    Example:
+        covers_roles('stearic acid', 'magnesium stearate')
+            -> {'mineral-fortificant'}        # lubricant match, Mg missing
+
+        covers_roles('vegetable magnesium stearate', 'magnesium stearate')
+            -> set()                           # full match
+    """
+    cand_roles = roles_for(candidate_name)
+    inc_roles = roles_for(incumbent_name)
+    if "unknown" in inc_roles:
+        return set()  # can't fail what we don't know
+    return inc_roles - cand_roles
+
+
+# --------------------------------------------------------------- self-test
+
+
+def _self_test() -> None:
+    """Property-based checks for multi-role ambiguity.
+
+    Run via `python -m reasoning.role_inferrer`. Exits non-zero on the
+    first failed assertion so CI / pre-commit can gate on role-table
+    regressions.
+    """
+    # Multi-role molecules must appear in both ROLE_RULES (with a
+    # primary role) and MULTI_ROLE_MOLECULES (with the full set).
+    for name, roles in MULTI_ROLE_MOLECULES.items():
+        assert isinstance(roles, set) and len(roles) >= 2, (
+            f"MULTI_ROLE_MOLECULES[{name!r}] must carry >=2 roles; got {roles!r}"
+        )
+        primary = ROLE_RULES.get(name)
+        assert primary in roles, (
+            f"ROLE_RULES[{name!r}]={primary!r} is not in the multi-role set {roles!r}"
+        )
+
+    # Anchor case: magnesium stearate is multi-role, stearic acid is
+    # single-role lubricant, so stearic acid partially covers MgSt.
+    gap = covers_roles("stearic acid", "magnesium stearate")
+    assert gap == {"mineral-fortificant"}, (
+        f"stearic acid should miss the mineral-fortificant role; got {gap!r}"
+    )
+
+    # Full coverage path.
+    gap_full = covers_roles("vegetable magnesium stearate", "magnesium stearate")
+    assert gap_full == set(), (
+        f"vegetable MgSt should fully cover MgSt; got missing={gap_full!r}"
+    )
+
+    # Wrong-role path: lecithin is an emulsifier, not a lubricant.
+    gap_wrong = covers_roles("soy lecithin", "magnesium stearate")
+    assert gap_wrong == {"lubricant", "mineral-fortificant"}, (
+        f"soy lecithin should miss both MgSt roles; got {gap_wrong!r}"
+    )
+
+    # Recipe-slot disambiguation for ascorbic acid.
+    tool = RoleInferrer()
+    r = tool("ascorbic acid", recipe_slot_hint="acidulant")
+    assert r.result == "acidulant" and r.confidence >= 0.8
+
+    r2 = tool("ascorbic acid")
+    assert r2.result == "antioxidant"  # primary role from ROLE_RULES
+
+    # Unknown path never invents a role.
+    r3 = tool("totally-made-up-ingredient")
+    assert r3.result == "unknown" and r3.confidence <= 0.3
+
+    print(f"role_inferrer self-test OK "
+          f"({len(ROLE_RULES)} rules, {len(MULTI_ROLE_MOLECULES)} multi-role)")
+
+
+if __name__ == "__main__":
+    _self_test()

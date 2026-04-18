@@ -33,6 +33,11 @@ class QualificationOutcome:
     compliance_result: dict
     refusal_result: dict
     justification_md: str
+    # Populated by qualify_candidate so the downstream decision-layer
+    # adapter can surface candidate names without re-querying the DB.
+    candidate_name: str = ""
+    candidate_sku_id: int = 0
+    candidate_supplier_name: str = ""
 
 
 def _persist_gate(
@@ -44,7 +49,18 @@ def _persist_gate(
     cc: float,
     evidence_ids: List[int],
 ) -> int:
+    # Prefer the explicit per-gate booleans the engine now returns; fall
+    # back to the legacy substring heuristic only if an older engine is
+    # wired up without per_gate_passed.
+    per_passed = gate_res.get("per_gate_passed") or {}
     notes = gate_res.get("notes", {})
+
+    def _gate_bit(name: str, fallback_tokens: tuple) -> int:
+        if name in per_passed:
+            return int(bool(per_passed[name]))
+        n = notes.get(name, "") or ""
+        return int(any(tok in n for tok in fallback_tokens))
+
     cur = conn.execute(
         """
         INSERT INTO Substitution_Gate_Result
@@ -57,12 +73,12 @@ def _persist_gate(
             opportunity_id,
             incumbent.sku_id,
             candidate.sku_id,
-            int("ok" in notes.get("canonical", "") or "match" in notes.get("canonical", "") or "curated" in notes.get("canonical", "")),
-            int("match" in notes.get("role", "") or "ok" in notes.get("role", "") or "accepted" in notes.get("role", "")),
-            int("ok" in notes.get("form", "") or "match" in notes.get("form", "")),
-            int("ok" in notes.get("grade", "")),
-            int("match" in notes.get("morphology", "") or "within" in notes.get("morphology", "") or "accepted" in notes.get("morphology", "")),
-            int("approved" in notes.get("regulatory", "")),
+            _gate_bit("canonical", ("exact", "curated_identical", "curated_equivalent", "curated_partial", "canonical_id_match")),
+            _gate_bit("role",      ("role_match", "role_unknown_both_sides_accepted")),
+            _gate_bit("form",      ("form_ok",)),
+            _gate_bit("grade",     ("grade_ok",)),
+            _gate_bit("morphology",("psd_match", "surface_area_within_2x", "morphology_unknown_accepted")),
+            _gate_bit("regulatory",("reg_approved",)),
             int(bool(gate_res.get("passed"))),
             gate_res.get("failed_gate"),
             cc,
@@ -201,4 +217,6 @@ def qualify_candidate(
         compliance_result=comp_tr.result or {},
         refusal_result=ref_tr.result or {},
         justification_md=md,
+        candidate_name=candidate_name,
+        candidate_sku_id=candidate.sku_id,
     )

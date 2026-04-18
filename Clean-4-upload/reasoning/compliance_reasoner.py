@@ -212,6 +212,179 @@ JURISDICTION_PACKS: Dict[str, Dict[str, Dict]] = {
         "mixed tocopherols":        {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "e_number": "E306"},
     },
 
+    "CA": {
+        # Canada — Health Canada NNHPD (Natural and Non-prescription Health
+        # Products Directorate). Rule keys mirror the NHPID (Natural Health
+        # Products Ingredients Database). We keep the schema compatible with
+        # the US-FDA / EU packs; the "npn_required" flag is CA-specific and
+        # is informational only (the baseline check treats it as a heads-up
+        # via the reason string, not a hard gate).
+        "sucralose":                {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "npn_required": False},
+        "stevia":                   {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "npn_required": False},
+        "aspartame":                {"allowed_use_classes": {"food", "beverage"}, "banned": False, "requires_gras": False, "npn_required": False},
+        # Sodium cyclamate is permitted only as a tabletop sweetener in CA
+        # (no food/beverage/supplement use). Model as effectively banned.
+        "cyclamate":                {"allowed_use_classes": set(), "banned": True,  "requires_gras": False, "npn_required": False},
+        "brominated vegetable oil": {"allowed_use_classes": set(), "banned": True,  "requires_gras": False, "npn_required": False},
+
+        # --- Vitamin C family --------------------------------------------
+        "vitamin c":                {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "npn_required": True},
+        "ascorbic acid":            {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "npn_required": True},
+        "l-ascorbic acid":          {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "npn_required": True},
+        "sodium ascorbate":         {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "npn_required": True},
+        "calcium ascorbate":        {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "npn_required": True},
+        "magnesium ascorbate":      {"allowed_use_classes": _SUP, "banned": False, "requires_gras": False, "npn_required": True},
+
+        # --- Cellulose / excipients (approved per Food and Drug Regulations B.16)
+        "cellulose":                {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "npn_required": False},
+        "microcrystalline cellulose": {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "npn_required": False},
+        "croscarmellose sodium":    {"allowed_use_classes": _FS,  "banned": False, "requires_gras": False, "npn_required": False},
+        "silicon dioxide":          {"allowed_use_classes": _FS,  "banned": False, "requires_gras": False, "npn_required": False},
+        "magnesium stearate":       {"allowed_use_classes": _FS,  "banned": False, "requires_gras": False, "npn_required": False},
+        "vegetable magnesium stearate": {"allowed_use_classes": _FS, "banned": False, "requires_gras": False, "npn_required": False},
+
+        # --- Calcium salts ----------------------------------------------
+        "calcium citrate":          {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "npn_required": True},
+        "calcium carbonate":        {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "npn_required": True},
+        "calcium phosphate":        {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "npn_required": True},
+
+        # --- Gelatin -----------------------------------------------------
+        "gelatin":                  {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "npn_required": False},
+
+        # --- Vitamin D family (approved per NHPID; cholecalciferol + ergocalciferol)
+        "vitamin d":                {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "npn_required": True},
+        "cholecalciferol":          {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "npn_required": True},
+        "ergocalciferol":           {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "npn_required": True},
+
+        # --- Protein families -------------------------------------------
+        "protein":                  {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "npn_required": False},
+        "whey protein":             {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "npn_required": False},
+        "pea protein":              {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "npn_required": False},
+        "soy protein":              {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "npn_required": False},
+
+        # --- Citric acid ------------------------------------------------
+        "citric acid":              {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "npn_required": False},
+
+        # --- Magnesium salts --------------------------------------------
+        "magnesium oxide":          {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "npn_required": True},
+        "magnesium citrate":        {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "npn_required": True},
+        "magnesium glycinate":      {"allowed_use_classes": _SUP, "banned": False, "requires_gras": False, "npn_required": True},
+        "magnesium malate":         {"allowed_use_classes": _SUP, "banned": False, "requires_gras": False, "npn_required": True},
+
+        # --- Zinc salts -------------------------------------------------
+        "zinc oxide":               {"allowed_use_classes": _SUP, "banned": False, "requires_gras": False, "npn_required": True},
+        "zinc citrate":             {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "npn_required": True},
+        "zinc gluconate":           {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "npn_required": True},
+        "zinc picolinate":          {"allowed_use_classes": _SUP, "banned": False, "requires_gras": False, "npn_required": True},
+
+        # --- Iron salts -------------------------------------------------
+        "ferrous sulfate":          {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "npn_required": True},
+        "ferrous gluconate":        {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "npn_required": True},
+
+        # --- Folate forms -----------------------------------------------
+        "folic acid":               {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "npn_required": True},
+        "methylfolate":             {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "npn_required": True},
+        "5-mthf":                   {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "npn_required": True},
+
+        # --- B12 forms --------------------------------------------------
+        "cyanocobalamin":           {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "npn_required": True},
+        "methylcobalamin":          {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "npn_required": True},
+        "adenosylcobalamin":        {"allowed_use_classes": _SUP, "banned": False, "requires_gras": False, "npn_required": True},
+
+        # --- Tocopherols (vitamin E) ------------------------------------
+        "d-alpha tocopherol":       {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "npn_required": True},
+        "dl-alpha tocopherol":      {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "npn_required": True},
+        "mixed tocopherols":        {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "npn_required": True},
+    },
+
+    "JP": {
+        # Japan — MHLW (Ministry of Health, Labour and Welfare) + CAA
+        # (Consumer Affairs Agency). Japan uses a *positive-list* system for
+        # food additives; anything not on the list is effectively unapproved.
+        # FOSHU (Food for Specified Health Uses) labelling is a separate
+        # CAA certification track — "foshu_eligible" is informational only.
+        "sucralose":                {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "foshu_eligible": False},
+        "stevia":                   {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "foshu_eligible": True},
+        "aspartame":                {"allowed_use_classes": {"food", "beverage"}, "banned": False, "requires_gras": False, "foshu_eligible": False},
+        # Cyclamate has been banned in Japan since 1969 — the canonical
+        # "compliance trap" scenario.
+        "cyclamate":                {"allowed_use_classes": set(), "banned": True,  "requires_gras": False, "foshu_eligible": False},
+        "brominated vegetable oil": {"allowed_use_classes": set(), "banned": True,  "requires_gras": False, "foshu_eligible": False},
+
+        # --- Vitamin C family (permitted as food additive + supplement)
+        "vitamin c":                {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "foshu_eligible": True},
+        "ascorbic acid":            {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "foshu_eligible": True},
+        "l-ascorbic acid":          {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "foshu_eligible": True},
+        "sodium ascorbate":         {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "foshu_eligible": False},
+        "calcium ascorbate":        {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "foshu_eligible": False},
+        # Magnesium ascorbate is not on the JP positive list for food use;
+        # supplement ("health food") only.
+        "magnesium ascorbate":      {"allowed_use_classes": _SUP, "banned": False, "requires_gras": False, "foshu_eligible": False},
+
+        # --- Cellulose / excipients (all on JP positive list) ------------
+        "cellulose":                {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "foshu_eligible": False},
+        "microcrystalline cellulose": {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "foshu_eligible": False},
+        "croscarmellose sodium":    {"allowed_use_classes": _FS,  "banned": False, "requires_gras": False, "foshu_eligible": False},
+        "silicon dioxide":          {"allowed_use_classes": _FS,  "banned": False, "requires_gras": False, "foshu_eligible": False},
+        "magnesium stearate":       {"allowed_use_classes": _FS,  "banned": False, "requires_gras": False, "foshu_eligible": False},
+        "vegetable magnesium stearate": {"allowed_use_classes": _FS, "banned": False, "requires_gras": False, "foshu_eligible": False},
+
+        # --- Calcium salts (positive list: carbonate/citrate/phosphate) --
+        "calcium citrate":          {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "foshu_eligible": True},
+        "calcium carbonate":        {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "foshu_eligible": True},
+        "calcium phosphate":        {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "foshu_eligible": True},
+
+        # --- Gelatin (natural food, not additive) ------------------------
+        "gelatin":                  {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "foshu_eligible": False},
+
+        # --- Vitamin D (both forms on positive list) ---------------------
+        "vitamin d":                {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "foshu_eligible": True},
+        "cholecalciferol":          {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "foshu_eligible": True},
+        "ergocalciferol":           {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "foshu_eligible": False},
+
+        # --- Protein families --------------------------------------------
+        "protein":                  {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "foshu_eligible": False},
+        "whey protein":             {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "foshu_eligible": False},
+        "pea protein":              {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "foshu_eligible": False},
+        "soy protein":              {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "foshu_eligible": True},
+
+        # --- Citric acid -------------------------------------------------
+        "citric acid":              {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "foshu_eligible": False},
+
+        # --- Magnesium salts --------------------------------------------
+        "magnesium oxide":          {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "foshu_eligible": False},
+        "magnesium citrate":        {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "foshu_eligible": False},
+        # Magnesium glycinate / malate aren't on the JP positive list;
+        # supplement-only (health-food) channel.
+        "magnesium glycinate":      {"allowed_use_classes": _SUP, "banned": False, "requires_gras": False, "foshu_eligible": False},
+        "magnesium malate":         {"allowed_use_classes": _SUP, "banned": False, "requires_gras": False, "foshu_eligible": False},
+
+        # --- Zinc salts -------------------------------------------------
+        "zinc oxide":               {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "foshu_eligible": False},
+        "zinc citrate":             {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "foshu_eligible": False},
+        "zinc gluconate":           {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "foshu_eligible": False},
+        "zinc picolinate":          {"allowed_use_classes": _SUP, "banned": False, "requires_gras": False, "foshu_eligible": False},
+
+        # --- Iron salts -------------------------------------------------
+        "ferrous sulfate":          {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "foshu_eligible": True},
+        "ferrous gluconate":        {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "foshu_eligible": True},
+
+        # --- Folate forms -----------------------------------------------
+        "folic acid":               {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "foshu_eligible": True},
+        "methylfolate":             {"allowed_use_classes": _SUP, "banned": False, "requires_gras": False, "foshu_eligible": False},
+        "5-mthf":                   {"allowed_use_classes": _SUP, "banned": False, "requires_gras": False, "foshu_eligible": False},
+
+        # --- B12 forms --------------------------------------------------
+        "cyanocobalamin":           {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "foshu_eligible": False},
+        "methylcobalamin":          {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "foshu_eligible": False},
+        "adenosylcobalamin":        {"allowed_use_classes": _SUP, "banned": False, "requires_gras": False, "foshu_eligible": False},
+
+        # --- Tocopherols (vitamin E) ------------------------------------
+        "d-alpha tocopherol":       {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "foshu_eligible": False},
+        "dl-alpha tocopherol":      {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "foshu_eligible": False},
+        "mixed tocopherols":        {"allowed_use_classes": _FBS, "banned": False, "requires_gras": False, "foshu_eligible": False},
+    },
+
     "US-USP": {
         # Pharma grade — USP-NF monograph requirement tightens what's
         # "compliant". Only ingredients with a real USP monograph go here.

@@ -80,6 +80,7 @@ def plan_opportunity(
             incumbent_precedents=cb.incumbent_precedents,
             evidence_ids=cb.supplier_features.evidence_ids,
         )
+        q.candidate_supplier_name = cb.candidate_supplier_name
         verdict.qualifications.append(q)
         if q.decision in ("recommend", "defer_human_review"):
             survivors.append(cb)
