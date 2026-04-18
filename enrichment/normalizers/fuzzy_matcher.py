@@ -145,6 +145,20 @@ def dedup_by_unii(conn: sqlite3.Connection) -> list[tuple[int, int, str]]:
                 (drop_id,)
             )
 
+            # Copy non-null fields from dropped row to kept row before deletion
+            for field in ("PubChem_CID", "CAS_Number", "SMILES", "Molport_Id", "FDC_Id", "RxCUI"):
+                drop_val = cur.execute(
+                    f"SELECT {field} FROM Ingredient_Canonical WHERE Id = ?", (drop_id,)
+                ).fetchone()[0]
+                keep_val = cur.execute(
+                    f"SELECT {field} FROM Ingredient_Canonical WHERE Id = ?", (keep_id,)
+                ).fetchone()[0]
+                if drop_val is not None and keep_val is None:
+                    cur.execute(
+                        f"UPDATE Ingredient_Canonical SET {field} = ? WHERE Id = ?",
+                        (drop_val, keep_id),
+                    )
+
             cur.execute("DELETE FROM Ingredient_Canonical WHERE Id = ?", (drop_id,))
             merge_log.append((keep_id, drop_id, unii))
             logger.info(f"UNII {unii}: merged {drop_name!r} (Id={drop_id}) → keep Id={keep_id}")

@@ -153,6 +153,17 @@ class PubChemClient:
         self._set_cache(cache_key, unii)
         return unii
 
+    def get_cid_by_name(self, name: str) -> int | None:
+        """Return PubChem CID for an arbitrary name, UNII, or CAS string. Cache-first."""
+        cache_key = f"cid_name:{name.lower()}"
+        in_cache, cached = self._get_cache(cache_key)
+        if in_cache:
+            return cached
+        _throttle()
+        cid = self._get_cid(name)
+        self._set_cache(cache_key, cid)
+        return cid
+
     def get_isomeric_smiles(self, cid: int) -> str | None:
         """Return IsomericSMILES for a PubChem CID. Cache-first, permanent TTL."""
         cache_key = f"smiles_{cid}"

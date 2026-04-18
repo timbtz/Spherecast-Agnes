@@ -115,6 +115,60 @@ def backfill_unii_from_pubchem_synonyms(db_path=ENRICHED_DB) -> None:
     logger.info(f"PubChem UNII backfill: {updated}/{len(rows)} rows populated")
 
 
+def backfill_cid_gaps(db_path=ENRICHED_DB) -> None:
+    """Populate PubChem_CID for canonicals that currently have none.
+
+    Tries identifiers in priority order: UNII → CAS → canonical name.
+    Run backfill_smiles() afterwards to pick up the newly found CIDs.
+    """
+    from enrichment.sources.pubchem import PubChemClient, _extract_cas
+    client = PubChemClient(db_path)
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute(
+        "SELECT Id, Name, UNII_Code, CAS_Number FROM Ingredient_Canonical WHERE PubChem_CID IS NULL"
+    ).fetchall()
+    logger.info(f"CID gap backfill: {len(rows)} canonicals to process")
+    updated = 0
+    for canonical_id, name, unii, cas in rows:
+        cid = None
+
+        if unii and unii != "0":
+            conn.commit()
+            cid = client.get_cid_by_name(unii)
+
+        if not cid and cas:
+            conn.commit()
+            cid = client.get_cid_by_name(cas)
+
+        if not cid:
+            conn.commit()
+            cid = client.get_cid_by_name(name)
+
+        if cid:
+            conn.execute(
+                "UPDATE Ingredient_Canonical SET PubChem_CID = ? WHERE Id = ?",
+                (cid, canonical_id),
+            )
+            if not cas:
+                try:
+                    synonyms = client._get_synonyms(cid)
+                    cas_found = _extract_cas(synonyms)
+                    if cas_found:
+                        conn.execute(
+                            "UPDATE Ingredient_Canonical SET CAS_Number = ? WHERE Id = ? AND CAS_Number IS NULL",
+                            (cas_found, canonical_id),
+                        )
+                except Exception:
+                    pass
+            conn.commit()
+            logger.info(f"  CID found: {name!r} → CID={cid}")
+            updated += 1
+        time.sleep(0.05)
+
+    conn.close()
+    logger.info(f"CID gap backfill complete: {updated}/{len(rows)} new CIDs")
+
+
 def backfill_match_scores(db_path=ENRICHED_DB) -> None:
     """Re-compute MatchScore for fuzzy-matched SKU_To_Canonical rows (no API calls)."""
     from rapidfuzz import fuzz
@@ -144,6 +198,8 @@ if __name__ == "__main__":
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s — %(message)s"
     )
+    backfill_cid_gaps()   # must run before backfill_smiles so new CIDs are present
     backfill_smiles()
+    backfill_unii_from_pubchem_synonyms()  # picks up UNIIs for newly-CID'd rows
     backfill_unii()
     backfill_match_scores()
