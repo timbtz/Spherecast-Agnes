@@ -1,4 +1,4 @@
--- Agnes Enriched Database Schema v1.0
+-- Agnes Enriched Database Schema v1.1
 -- Applied by enrichment/db_bootstrap.py on top of a cloned db.sqlite.
 -- All original tables (Company, Product, BOM, BOM_Component, Supplier, Supplier_Product)
 -- are already present after the clone — this file creates only the enrichment tables.
@@ -15,7 +15,13 @@ CREATE TABLE IF NOT EXISTS Ingredient_Canonical (
     Molecular_Formula   TEXT,
     Function            TEXT,                    -- "excipient:lubricant" | "nutrient:mineral" etc.
     Confidence          REAL    NOT NULL DEFAULT 0.0,   -- 0.0–1.0
-    Sources             TEXT    NOT NULL DEFAULT '[]'   -- JSON array of source strings
+    Sources             TEXT    NOT NULL DEFAULT '[]',  -- JSON array of source strings
+    UNII_Code           TEXT,                    -- FDA UNII identifier
+    Molport_Id          TEXT,                    -- Molport compound ID
+    FDC_Id              INTEGER,                 -- USDA FDC ID
+    RxCUI               TEXT,                    -- RxNorm CUI
+    SMILES              TEXT,                    -- IsomericSMILES from PubChem
+    Grade_Flag          TEXT    DEFAULT 'unknown' -- food|pharma|reagent|unknown
 );
 
 -- Maps original Product SKUs → canonical ingredient
@@ -25,6 +31,7 @@ CREATE TABLE IF NOT EXISTS SKU_To_Canonical (
     ExtractedName       TEXT,                    -- human-readable name parsed from slug
     MatchMethod         TEXT,                    -- pubchem|dsld|rxnorm|fuzzy|manual
     Confidence          REAL    NOT NULL DEFAULT 0.0,
+    MatchScore          REAL,                    -- raw rapidfuzz score (0–100) for fuzzy matches
     CreatedAt           TEXT    NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (ProductId),
     FOREIGN KEY (ProductId)   REFERENCES Product(Id),
@@ -39,6 +46,7 @@ CREATE TABLE IF NOT EXISTS Ingredient_Substitution (
     Score               REAL    NOT NULL DEFAULT 0.0,   -- 0.0–1.0
     Notes               TEXT,
     Sources             TEXT    NOT NULL DEFAULT '[]',  -- JSON array
+    Caveats             TEXT,
     PRIMARY KEY (IngredientAId, IngredientBId),
     FOREIGN KEY (IngredientAId) REFERENCES Ingredient_Canonical(Id),
     FOREIGN KEY (IngredientBId) REFERENCES Ingredient_Canonical(Id)
@@ -55,6 +63,7 @@ CREATE TABLE IF NOT EXISTS BOM_Component_Quantity (
     PerServing          REAL,                    -- servings per container
     ServingUnit         TEXT,                    -- "capsule"|"tablet"|"scoop"|"ml"
     DSLD_Label_Id       TEXT,                    -- DSLD label ID used as source
+    ServingsPerContainer REAL,                   -- total servings in the container
     Off_Market          INTEGER,                 -- 0=current, 1=off-market label
     Source              TEXT,                    -- dsld|iherb|walmart|target|vitacost|manual
     Source_URL          TEXT,
@@ -76,9 +85,16 @@ CREATE TABLE IF NOT EXISTS Supplier_Commercial (
     Country_Origin          TEXT,
     Price_Type              TEXT,                -- retail_proxy|wholesale|spot|quoted
     Price_Source            TEXT,                -- purebulk|alibaba|molport|bulksupplements|manual
-    Confidence              TEXT,                -- high|medium|low|proxy
+    Confidence              REAL    NOT NULL DEFAULT 0.0,
     Source_URL              TEXT,
     Last_Updated            TEXT,
+    Price_Qty_KG            REAL,                -- quantity tier the price applies to
+    Purity_Pct              REAL,                -- purity percentage from supplier
+    Purity_Qualifier        TEXT,                -- ">98%", "≥99%", etc.
+    Grade_Unverified        INTEGER NOT NULL DEFAULT 1,  -- 1=grade not confirmed
+    Molport_Catalog_Id      TEXT,                -- Molport catalog entry ID
+    Data_Freshness_Days     INTEGER,             -- days since last Molport update
+    Country_Shipping        TEXT,                -- ISO country code for shipping origin
     PRIMARY KEY (SupplierId, CanonicalIngredientId),
     FOREIGN KEY (SupplierId)            REFERENCES Supplier(Id),
     FOREIGN KEY (CanonicalIngredientId) REFERENCES Ingredient_Canonical(Id)
@@ -93,6 +109,7 @@ CREATE TABLE IF NOT EXISTS Product_Compliance (
     Verified_Date       TEXT,
     Source              TEXT,                    -- dsld|retailer_badge|label_text|manual
     Confidence          REAL    NOT NULL DEFAULT 0.0,
+    Off_Market_Warning  INTEGER NOT NULL DEFAULT 0,  -- 1=cert from off-market label only
     PRIMARY KEY (ProductId, Certification),
     FOREIGN KEY (ProductId) REFERENCES Product(Id)
 );
@@ -113,6 +130,10 @@ CREATE TABLE IF NOT EXISTS Consolidation_Opportunity (
     Proposal_Text               TEXT,            -- LLM-generated markdown narrative
     Proposal_JSON               TEXT,            -- structured JSON proposal
     Generated_At                TEXT,
+    Unique_SKU_Count            INTEGER DEFAULT 0,
+    Score_Formula_Component     REAL,            -- formula-computed score component
+    Score_LLM_Adjustment        REAL,            -- LLM ±0.10 adjustment (top-50 only)
+    Compliance_Feasible         INTEGER,         -- 1=all required certs achievable
     FOREIGN KEY (CanonicalIngredientId) REFERENCES Ingredient_Canonical(Id)
 );
 

@@ -38,6 +38,13 @@ must be built to scale to 800–1,000 products. Without retailer scraping, any B
 that DSLD misses (complex products, store-brand items like Equate/up&up) remains at
 `confidence=0.0` and blocks downstream Phase 3 reasoning.
 
+**Current known state (before this plan runs):** Phase 2 DSLD enrichment produced 294 rows
+at 19.2% component coverage across 55 matched finished goods. The `SQLBackendPRD.md`
+improvements (threshold tuning, UNII matching, brand synonyms, offMarket acceptance) are
+expected to lift this to 500–700 rows before the scraper runs. The scraper targets the
+remaining ~30–50 products with no DSLD presence (store-brand, newer products, brands not
+indexed in DSLD).
+
 ---
 
 ## Solution Statement
@@ -65,6 +72,19 @@ All extractions are cached in `API_Response_Cache` with 7-day TTL.
 
 ---
 
+## Value Proposition
+
+The scraper is the **second-tier fallback** after DSLD, not a replacement for it. Its specific value:
+
+- **Store-brand coverage**: Equate (Walmart), up&up (Target), Kirkland (Costco) have zero DSLD presence. These are typically high-volume SKUs used by many companies — high consolidation value.
+- **Retail pricing signal**: `Product_Retail_Variant` captures real shelf prices and container sizes, enabling per-unit cost comparisons that DSLD cannot provide.
+- **Supplement facts for newer products**: DSLD lags 6–18 months behind market. Recent product launches with no DSLD label get enriched via live page scraping.
+- **BOM quantity confidence**: Scraped amounts come from the live product page — the authoritative source — not a historical DSLD database entry that may be `offMarket=1`.
+
+Without this tier, ~20–30% of finished goods will remain at `confidence=0.0` in `BOM_Component_Quantity`, making Phase 4 consolidation proposals inaccurate for any brand with retailer-only presence.
+
+---
+
 ## Feature Metadata
 
 **Feature Type**: New Capability
@@ -75,17 +95,62 @@ All extractions are cached in `API_Response_Cache` with 7-day TTL.
   - `schema/enriched_schema.sql` + `enrichment/db_bootstrap.py` (new table)
   - `requirements.txt` (new deps)
 **Dependencies**:
-  - `google-adk>=0.5.0` ← already installed
-  - `playwright>=1.44.0` ← already installed
-  - `beautifulsoup4>=4.12.0` ← already installed
-  - `anthropic>=0.40.0` ← already installed
+  - `google-adk>=0.5.0` ← verify installed: `python -c "import google.adk; print(google.adk.__version__)"`
+  - `playwright>=1.44.0` ← verify installed: `python -c "import playwright; print('ok')"`
+  - `beautifulsoup4>=4.12.0` ← verify installed: `python -c "from bs4 import BeautifulSoup; print('ok')"`
+  - `anthropic>=0.40.0` ← verify installed: `python -c "import anthropic; print(anthropic.__version__)"`
   - `instructor[anthropic]>=1.7.0` ← NEW: structured + validated LLM output
   - `browser-use>=0.35.0` ← NEW: AI-driven browser fallback
   - `langchain-google-genai>=2.0.0` ← NEW: LLM adapter for browser-use + Gemini Flash
 
 ---
 
+## Prerequisites — Run These PRD Phases First
+
+**This plan must not be executed until the following `SQLBackendPRD.md` phases are complete:**
+
+| PRD Phase | What it delivers | Why scraper needs it |
+|---|---|---|
+| Phase A — Schema v1.1 | `BOM_Component_Quantity` has `DSLD_Label_Id`, `ServingsPerContainer`, `OffMarket` columns | Scraper writes to these columns; they must exist |
+| Phase A — `Product_Retail_Variant` table | New table in `enriched_schema.sql` | This plan adds the DDL (Task 2); confirm it hasn't already been added by PRD work |
+| Phase B — UNII dedup | Vitamin C / Ascorbic Acid merged; canonical IDs stable | BOM lookups must find the right canonical; duplicates corrupt scraper-written rows |
+| Phase C — Phase 2 DSLD re-run | DSLD coverage lifted to ≥ 500 rows | Confirms which products genuinely have no DSLD match and need the scraper |
+
+**Validation query before starting:**
+```sql
+-- Confirm PRD Phase A schema is live
+SELECT COUNT(*) FROM pragma_table_info('BOM_Component_Quantity')
+WHERE name IN ('DSLD_Label_Id', 'ServingsPerContainer', 'OffMarket');
+-- Must return 3
+
+-- Confirm UNII dedup is done
+SELECT COUNT(*) FROM (
+  SELECT UNII_Code FROM Ingredient_Canonical
+  WHERE UNII_Code IS NOT NULL
+  GROUP BY UNII_Code HAVING COUNT(*) > 1
+);
+-- Must return 0
+
+-- Confirm Phase 2 DSLD re-run is done
+SELECT COUNT(*) FROM BOM_Component_Quantity;
+-- Must be ≥ 500 before scraper adds more
+```
+
+---
+
 ## CONTEXT REFERENCES
+
+### Research-First Mandate
+
+**Every file path, function name, method signature, and line number in this document was accurate at the time it was written. By the time this plan runs, the `SQLBackendPRD.md` implementation will have changed several of them.**
+
+Before implementing any task that modifies an existing file, read that file first. Do not assume:
+- Function signatures are unchanged (especially `_store_amounts`, `_enrich_product`)
+- Line numbers are stable
+- Column names in `INSERT` statements match the current schema
+- Import paths haven't moved
+
+For the two new source files (`google_search.py`, `retailer_scraper.py`), the code in this document is a complete starting point and can be used as-is — these files don't exist yet and don't depend on internal function signatures. The only external dependency to verify is the ADK API version (see Task 4 gotchas).
 
 ### Relevant Codebase Files — READ BEFORE IMPLEMENTING
 
@@ -94,10 +159,11 @@ All extractions are cached in `API_Response_Cache` with 7-day TTL.
   `INSERT OR REPLACE INTO API_Response_Cache`, logger naming (`agnes.{module}`),
   `ROOT = Path(__file__).parent.parent.parent` pattern, `requests.Session` with User-Agent header.
 
-- `enrichment/enrichers/quantity_enricher.py` (lines 38–66)
-  Why: **The TODO stub to fill**. `_enrich_product` calls DSLD (Tier 1) then falls
+- `enrichment/enrichers/quantity_enricher.py` (read the full file — do not use line numbers from this document)
+  Why: **The file to modify**. `_enrich_product` calls DSLD (Tier 1) then falls
   through; your `ProductScraper().scrape(sku, product_name)` becomes Tier 2 here.
-  Also shows how `_store_amounts` writes to `BOM_Component_Quantity` — don't duplicate this.
+  Also shows how `_store_amounts` writes to `BOM_Component_Quantity` — read its actual
+  current signature before calling it. The PRD will have changed it.
 
 - `enrichment/parsers/sku_parser.py` (lines 1–30)
   Why: SKU format reference. `FG-{retailer}-{product_id}` is parsed by
@@ -1323,39 +1389,110 @@ Rules:
 
 ### Task 6 — UPDATE `enrichment/enrichers/quantity_enricher.py`
 
-Replace the `# TODO` stub at line 64 with the Tier 2 call. Keep everything else identical.
+**RESEARCH REQUIRED BEFORE IMPLEMENTING. Do not write a single line of code until Steps 6.1–6.3 are complete.**
 
-Find this block (lines 62–66):
-```python
-        # Tier 2: Retailer browser scraping — TODO: implement in Phase 2 sprint
-        logger.debug(f"DSLD miss for product_id={product_id} '{product_name}' — browser agent needed")
-        self._log_skip(product_id, "DSLD miss — browser scraping not yet implemented")
+The PRD will have modified `quantity_enricher.py` before this task runs — adding UNII-based matching, offMarket acceptance, brand synonym expansion, and NP unit handling. Line numbers, method signatures, and the exact shape of `_store_amounts` will have changed. All code samples below are illustrative starting points, not ground truth.
+
+---
+
+#### Step 6.1 — Read the current file in full
+
+```bash
+cat enrichment/enrichers/quantity_enricher.py
 ```
 
-Replace with:
+While reading, identify and note down:
+
+1. **The DSLD miss point** — the `if not match:` branch inside `_enrich_product` that currently calls `_log_skip` and returns. This is where the scraper call belongs. Do NOT assume it is at line 68. The PRD will have added a UNII-based match attempt between the slug-path miss and this fallback point — the structure will look different.
+
+2. **`_store_amounts` current signature** — Read its `def` line and its body. The PRD (Step 4) will have changed it to handle: `ServingsPerContainer`, NP-unit filtering, `OffMarket` flag, and potentially a `source` override. It may have been split into separate DSLD and non-DSLD paths. Note every parameter it currently accepts.
+
+3. **`boms` availability** — `_enrich_product` fetches `boms` early (a list of BOM IDs for the product). Confirm this variable is still in scope at the DSLD miss point. If the PRD restructured control flow, you may need to re-fetch it.
+
+4. **`_log_skip` or equivalent** — Confirm the method name and its parameters. It may have been renamed or have an additional `method` field after PRD changes.
+
+5. **Any existing `_store_size_variants`** — Search for it: `grep -n "size_variant" enrichment/enrichers/quantity_enricher.py`. If present, read its signature; don't add a duplicate.
+
+---
+
+#### Step 6.2 — Understand the storage data contract
+
+`_store_amounts` writes to `BOM_Component_Quantity`. The scraper path differs from DSLD in three fields:
+
+| Column | DSLD path value | Scraper path value |
+|---|---|---|
+| `Source` | `'dsld'` | `product_data.retailer` (e.g. `'walmart'`, `'vitacost'`) |
+| `DSLD_Label_Id` | `str(match["dsld_id"])` | `NULL` — no DSLD record exists |
+| `Off_Market` | from `match["off_market"]` | `0` — live retail pages are current listings |
+| `Confidence` | computed from fuzzy match score | `product_data.confidence` |
+
+The method must be callable from both code paths. You have two options — choose whichever fits the current code structure:
+
+**Option A** — Add `match=None` optional parameter with source override:
+```python
+# Illustrative — adapt to actual current signature
+def _store_amounts(self, product_id, boms, ingredients, match=None,
+                   source_override=None, dsld_label_id=None):
+    source = source_override or "dsld"
+    label_id = dsld_label_id if source_override else str(match["dsld_id"])
+    off_market = 0 if source_override else (1 if match.get("off_market") == "1" else 0)
+    ...
+```
+
+**Option B** — Add a separate `_store_scraped_amounts(product_id, boms, product_data)` that builds its own INSERT calls.
+
+Read the current body of `_store_amounts` before choosing. If the PRD has already parameterised `source`, adapt to what exists.
+
+---
+
+#### Step 6.3 — Identify the exact insertion point
+
+Find the DSLD miss point by searching:
+```bash
+grep -n "log_skip\|No DSLD match\|browser\|TODO" enrichment/enrichers/quantity_enricher.py
+```
+
+The scraper call goes **immediately after the last DSLD/fingerprint match attempt fails** and **before** the final `_log_skip` return. If the PRD added UNII-based DSLD matching as a third attempt, the scraper goes after that too — it is always the last automated tier before manual review.
+
+---
+
+#### Step 6.4 — Implement the Tier 2 call
+
+At the insertion point identified in Step 6.3, add:
+
 ```python
         # Tier 2: Retailer browser scraping
         from enrichment.sources.retailer_scraper import ProductScraper
         scraper = ProductScraper(self.db_path)
         product_data = scraper.scrape(sku, product_name)
+        # NOTE: 'sku' and 'product_name' must be in scope here.
+        # In the pre-PRD code, 'sku' came from _enrich_product's parameter list
+        # and 'product_name' from _parse_fg_sku(). Verify both are still available
+        # at this point in the refactored method.
 
         if product_data and product_data.supplement_facts:
             facts = product_data.supplement_facts
             ingredients = facts.get("ingredients", [])
             if ingredients:
-                amounts = [
+                scraped_amounts = [
                     {
                         "ingredient_name": ing.get("name", ""),
                         "amount": ing.get("amount"),
                         "unit": ing.get("unit"),
                         "per_serving": facts.get("servings_per_container"),
                         "serving_unit": facts.get("serving_size"),
-                        "source": product_data.retailer,
                         "confidence": product_data.confidence,
                     }
                     for ing in ingredients if ing.get("name")
                 ]
-                self._store_amounts(product_id, amounts)
+                # ADAPT THIS CALL to the actual current _store_amounts signature.
+                # Key requirement: Source=product_data.retailer, DSLD_Label_Id=NULL.
+                # If the method was split or renamed, call whatever now handles storage.
+                self._store_amounts(
+                    product_id, boms, scraped_amounts,
+                    source_override=product_data.retailer,
+                    dsld_label_id=None,
+                )
                 self._store_size_variants(product_id, product_data)
                 self._log_skip(
                     product_id,
@@ -1366,27 +1503,38 @@ Replace with:
         self._log_skip(product_id, "all_tiers_failed — flagged for manual review")
 ```
 
-Also **ADD** `_store_size_variants` method to `QuantityEnricher` (after `_store_amounts`):
+---
+
+#### Step 6.5 — Add `_store_size_variants` (if not already present)
+
+First confirm it doesn't exist (Step 6.1). If absent, add after `_store_amounts`:
+
 ```python
-def _store_size_variants(self, product_id: int, product_data) -> None:
-    """Store all scraped size variants in Product_Retail_Variant."""
-    if not product_data.size_variants:
-        return
-    conn = sqlite3.connect(self.db_path)
-    for v in product_data.size_variants:
-        conn.execute(
-            """INSERT OR REPLACE INTO Product_Retail_Variant
-               (ProductId, RetailSizeLabel, Price_USD, Source, Source_URL, Is_Default)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (
-                product_id, v.label, v.price_usd,
-                product_data.retailer, product_data.source_url,
-                1 if v.is_default else 0,
-            ),
-        )
-    conn.commit()
-    conn.close()
+    def _store_size_variants(self, product_id: int, product_data) -> None:
+        """Store scraped size variants in Product_Retail_Variant."""
+        if not product_data.size_variants:
+            return
+        conn = sqlite3.connect(self.db_path)
+        for v in product_data.size_variants:
+            conn.execute(
+                """INSERT OR REPLACE INTO Product_Retail_Variant
+                   (ProductId, RetailSizeLabel, Price_USD, Source, Source_URL, Is_Default)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    product_id, v.label, v.price_usd,
+                    product_data.retailer, product_data.source_url,
+                    1 if v.is_default else 0,
+                ),
+            )
+        conn.commit()
+        conn.close()
 ```
+
+Verify `Product_Retail_Variant` exists in the schema before running:
+```bash
+sqlite3 db_enriched.sqlite ".schema Product_Retail_Variant"
+```
+If the table is missing, run `python enrichment/db_bootstrap.py --bootstrap` first (Task 2 adds the DDL to `enriched_schema.sql`).
 
 - **VALIDATE**: `python enrichment/pipeline.py --phase 2 2>&1 | head -50`
 
@@ -1591,18 +1739,34 @@ time python enrichment/pipeline.py --phase 2 2>&1 | grep "complete"
 
 ## COMPLETION CHECKLIST
 
+**Prerequisites (must be green before starting)**
+- [ ] PRD Phase A schema migration complete (`PRAGMA table_info('BOM_Component_Quantity')` returns `DSLD_Label_Id`, `ServingsPerContainer`, `OffMarket`)
+- [ ] PRD Phase B UNII dedup complete (zero duplicate UNII rows)
+- [ ] PRD Phase C Phase 2 DSLD re-run complete (`BOM_Component_Quantity` ≥ 500 rows)
+
+**Research (do before writing code)**
+- [ ] Read `quantity_enricher.py` in full; noted current `_store_amounts` signature
+- [ ] Identified the DSLD miss point in `_enrich_product` (grep for `log_skip`/`No DSLD match`)
+- [ ] Confirmed `boms` variable is in scope at the miss point
+- [ ] Confirmed `Product_Retail_Variant` table not already added by PRD work
+
+**Implementation**
 - [ ] `requirements.txt` updated with instructor, browser-use, langchain-google-genai
-- [ ] `schema/enriched_schema.sql` contains `Product_Retail_Variant` DDL
+- [ ] `schema/enriched_schema.sql` contains `Product_Retail_Variant` DDL (if not already added)
 - [ ] `db_bootstrap.py` verified to apply the new table automatically
 - [ ] `enrichment/sources/google_search.py` created and import-tested
 - [ ] `enrichment/sources/retailer_scraper.py` created and import-tested
-- [ ] `quantity_enricher.py` TODO stub replaced with ProductScraper call
-- [ ] `_store_size_variants` added to QuantityEnricher
+- [ ] `quantity_enricher.py` DSLD miss point replaced with ProductScraper Tier 2 call
+- [ ] `_store_amounts` adapted to accept scraper path (source override, null DSLD_Label_Id)
+- [ ] `_store_size_variants` added to QuantityEnricher (or confirmed already present)
+
+**Validation**
 - [ ] Vitacost smoke test passes
 - [ ] Walmart smoke test passes (verify __NEXT_DATA__ path at runtime)
 - [ ] Google ADK search smoke test passes
-- [ ] Phase 2 full run completes, DB has enriched data
+- [ ] Phase 2 full run completes, DB has enriched data beyond the DSLD baseline
 - [ ] Second Phase 2 run is cache-hit fast (idempotency verified)
+- [ ] `SELECT Source, COUNT(*) FROM BOM_Component_Quantity GROUP BY Source` shows both `dsld` and retailer sources
 
 ---
 

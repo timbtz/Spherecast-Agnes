@@ -3,10 +3,13 @@
 SKU format: RM-C{companyId}-{ingredient-slug}-{8-hex-hash}
 Example:    RM-C30-magnesium-stearate-201fdf47  →  "magnesium stearate"
 """
+import logging
 import re
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
+
+logger = logging.getLogger("agnes.sku_parser")
 
 SKU_PATTERN = re.compile(r"^RM-C(\d+)-(.+)-([0-9a-f]{8})$", re.IGNORECASE)
 
@@ -29,6 +32,12 @@ SLUG_EXPANSIONS: list[tuple[str, str]] = [
 # Slug fragments that indicate an ingredient is a proprietary blend or non-normalizable
 COMPLEX_MARKERS = frozenset(["complex", "blend", "mix", "proprietary", "natural-flavor",
                               "natural-flavour", "other-ingredient", "excipient"])
+
+# Full slugs that pattern-match as ingredients but are known parser artifacts
+KNOWN_NON_INGREDIENTS: frozenset[str] = frozenset([
+    "sucralose-cid-56038-13-2",
+    "prop-65-warning",
+])
 
 
 @dataclass
@@ -64,6 +73,10 @@ def parse_sku(sku: str, product_id: int = 0) -> ParsedSKU | None:
     company_id = int(m.group(1))
     slug = m.group(2)
     hash_suffix = m.group(3)
+
+    if slug.lower() in KNOWN_NON_INGREDIENTS:
+        logger.debug(f"Skipping known non-ingredient SKU slug: {slug}")
+        return None
     extracted_name = _slug_to_name(slug)
     is_complex = any(marker in slug.lower() for marker in COMPLEX_MARKERS)
 

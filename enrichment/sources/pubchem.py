@@ -137,6 +137,24 @@ class PubChemClient:
         except Exception:
             pass
 
+    def get_isomeric_smiles(self, cid: int) -> str | None:
+        """Return IsomericSMILES for a PubChem CID. Cache-first, permanent TTL."""
+        cache_key = f"smiles_{cid}"
+        in_cache, cached = self._get_cache(cache_key)
+        if in_cache:
+            return cached  # may be None (confirmed no SMILES for this CID)
+        _throttle()
+        url = f"{PUBCHEM_BASE}/cid/{cid}/property/IsomericSMILES/JSON"
+        resp = _get(url)
+        smiles = None
+        if resp is not None:
+            props = resp.json().get("PropertyTable", {}).get("Properties", [{}])
+            if props:
+                # PubChem returns "SMILES" (not "IsomericSMILES") as the key in this endpoint
+                smiles = props[0].get("IsomericSMILES") or props[0].get("SMILES")
+        self._set_cache(cache_key, smiles)
+        return smiles
+
 
 # ── Module-level helpers ─────────────────────────────────────────────────────
 
@@ -179,7 +197,11 @@ def _pick_preferred_name(synonyms: list[str], fallback: str) -> str:
             continue
         if len(syn) > 80:  # IUPAC names tend to be long
             continue
-        if syn.count('(') > 2:  # IUPAC nesting
+        if syn.count('(') > 1:  # IUPAC nesting (bis, tris, tetrakis, etc.)
+            continue
+        if ';' in syn:  # IUPAC salt/complex notation e.g. "magnesium;tris(...)"
+            continue
+        if re.search(r'\b(bis|tris|tetrakis|pentakis)\(', syn, re.I):
             continue
         return syn.strip()
     return fallback

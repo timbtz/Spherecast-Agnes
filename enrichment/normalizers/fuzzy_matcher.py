@@ -75,3 +75,59 @@ class FuzzyMatcher:
     def invalidate_cache(self) -> None:
         """Force reload of canonical names on next match call."""
         self._cache = None
+
+
+def dedup_by_unii(conn: sqlite3.Connection) -> list[tuple[int, int, str]]:
+    """Merge Ingredient_Canonical rows sharing a UNII_Code.
+
+    Keeps the row with the lowest Id (earliest resolved). Re-points all FK references.
+    Returns list of (keep_id, drop_id, unii_code) for substitution seeding.
+    """
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT UNII_Code, MIN(Id) AS keep_id, GROUP_CONCAT(Id) AS all_ids,
+               GROUP_CONCAT(Name, '|||') AS all_names
+        FROM Ingredient_Canonical
+        WHERE UNII_Code IS NOT NULL
+        GROUP BY UNII_Code
+        HAVING COUNT(*) > 1
+    """)
+    groups = cur.fetchall()
+    merge_log: list[tuple[int, int, str]] = []
+
+    for unii, keep_id, all_ids_str, all_names_str in groups:
+        all_ids = [int(x) for x in all_ids_str.split(",")]
+        drop_ids = [i for i in all_ids if i != keep_id]
+        all_names = all_names_str.split("|||")
+        drop_names = [n for i, n in zip(all_ids, all_names) if i != keep_id]
+
+        for drop_id, drop_name in zip(drop_ids, drop_names):
+            # Re-point SKU_To_Canonical; use OR IGNORE to skip conflicts (same product mapped to both)
+            cur.execute(
+                "UPDATE OR IGNORE SKU_To_Canonical SET CanonicalId = ? WHERE CanonicalId = ?",
+                (keep_id, drop_id)
+            )
+            # Drop any remaining rows for drop_id (couldn't be re-pointed due to PK conflict)
+            cur.execute("DELETE FROM SKU_To_Canonical WHERE CanonicalId = ?", (drop_id,))
+
+            # Re-point Ingredient_Substitution FKs
+            cur.execute(
+                "UPDATE OR IGNORE Ingredient_Substitution SET IngredientAId = ? WHERE IngredientAId = ?",
+                (keep_id, drop_id)
+            )
+            cur.execute(
+                "UPDATE OR IGNORE Ingredient_Substitution SET IngredientBId = ? WHERE IngredientBId = ?",
+                (keep_id, drop_id)
+            )
+            # Remove self-referencing rows created by the merge
+            cur.execute(
+                "DELETE FROM Ingredient_Substitution WHERE IngredientAId = IngredientBId"
+            )
+
+            cur.execute("DELETE FROM Ingredient_Canonical WHERE Id = ?", (drop_id,))
+            merge_log.append((keep_id, drop_id, unii))
+            logger.info(f"UNII {unii}: merged {drop_name!r} (Id={drop_id}) → keep Id={keep_id}")
+
+    conn.commit()
+    logger.info(f"UNII dedup complete: {len(merge_log)} canonical rows merged")
+    return merge_log

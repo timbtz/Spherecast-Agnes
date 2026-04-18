@@ -18,6 +18,23 @@ ENRICHED_DB = ROOT / "db_enriched.sqlite"
 
 logger = logging.getLogger("agnes.quantity_enricher")
 
+BRAND_SYNONYMS: dict[str, list[str]] = {
+    "NOW Foods": ["NOW", "Now Foods", "Now"],
+    "Thorne": ["Thorne FX", "Thorne Research"],
+    "Garden of Life": ["Garden Of Life", "GOL"],
+    "Nature Made": ["NatureMade", "Nature's Made"],
+    "Jarrow Formulas": ["Jarrow"],
+    "Life Extension": ["LEF", "Life Ext"],
+    "Solgar": ["Solgar Inc"],
+    "MegaFood": ["Mega Food"],
+    "Rainbow Light": ["Rainbow Light Nutritional"],
+    "New Chapter": ["New Chapter Inc"],
+}
+# Reverse map: variant → canonical brand name
+_BRAND_REVERSE: dict[str, str] = {
+    v: k for k, vs in BRAND_SYNONYMS.items() for v in vs
+}
+
 
 class QuantityEnricher:
     def __init__(self, db_path: str | Path = ENRICHED_DB):
@@ -62,7 +79,7 @@ class QuantityEnricher:
         if not match:
             bom_id = boms[0][0]
             conn2 = sqlite3.connect(self.db_path)
-            match = self._fingerprint_match(conn2, company_name, bom_id)
+            match = self._fingerprint_match(conn2, brand, bom_id)
             conn2.close()
 
         if not match:
@@ -74,12 +91,21 @@ class QuantityEnricher:
             self._log_skip(product_id, f"Empty ingredients for DSLD label {match['dsld_id']}")
             return
 
+        # Extract servingsPerContainer from the cached label
+        label_meta = self._dsld.get_label(match["dsld_id"])
+        if label_meta:
+            match = dict(match)
+            match["servings_per_container"] = label_meta.get("servingsPerContainer")
+
         self._store_amounts(product_id, boms, ingredients, match)
 
     def _parse_fg_sku(self, sku: str, company_name: str) -> tuple[str, str | None]:
         """Return (brand, product_name_or_None) for DSLD search."""
+        # Normalize company name via brand synonym reverse map
+        brand = _BRAND_REVERSE.get(company_name, company_name)
+
         if not sku.startswith("FG-"):
-            return company_name, None
+            return brand, None
         rest = sku[3:]
 
         for prefix in ("iherb-", "walmart-", "amazon-", "target-", "vitacost-",
@@ -88,14 +114,19 @@ class QuantityEnricher:
             if rest.startswith(prefix):
                 slug = rest[len(prefix):]
                 if re.match(r'^\d+$', slug) or re.match(r'^[A-Z0-9\-]+$', slug):
-                    return company_name, None
+                    return brand, None
                 product_name = slug.replace("-", " ").strip()
-                return company_name, product_name
-        return company_name, None
+                return brand, product_name
+        return brand, None
 
     def _fingerprint_match(self, conn: sqlite3.Connection, company_name: str,
                            bom_id: int) -> dict | None:
-        """Match a finished good to DSLD by ingredient overlap."""
+        """Match a finished good to DSLD by ingredient overlap.
+
+        Searches brand+key_ingredient for precision, then falls back to brand-only.
+        Filters hits by brand similarity (>= 0.5) to avoid false brand matches.
+        """
+        from rapidfuzz import fuzz
         bom_ingredients = conn.execute("""
             SELECT ic.Name FROM Ingredient_Canonical ic
             JOIN SKU_To_Canonical stc ON stc.CanonicalId = ic.Id
@@ -107,14 +138,31 @@ class QuantityEnricher:
             return None
 
         bom_names = {r[0].lower() for r in bom_ingredients}
+        bom_list = list(bom_names)
 
-        data = self._dsld._search({"q": company_name, "size": 10})
-        if not data or not data.get("hits"):
-            return None
+        # Search with brand+key_ingredient for precision, then brand-only as fallback
+        queries = [f"{company_name} {bom_list[0]}"] if bom_list else []
+        queries.append(company_name)
 
+        seen_ids: set[str] = set()
+        all_hits: list[dict] = []
+        for q in queries:
+            data = self._dsld._search({"q": q, "size": 15})
+            if data and data.get("hits"):
+                for h in data["hits"]:
+                    hid = h.get("_id", "")
+                    if hid not in seen_ids:
+                        seen_ids.add(hid)
+                        all_hits.append(h)
+
+        brand_lower = company_name.lower()
         best, best_overlap = None, 0
-        for hit in data["hits"]:
+        for hit in all_hits:
             src = hit.get("_source", {})
+            # Require brand similarity >= 0.5 to avoid spurious matches
+            brand_sim = fuzz.partial_ratio(brand_lower, src.get("brandName", "").lower()) / 100
+            if brand_sim < 0.50:
+                continue
             dsld_ingredients = {i["name"].lower() for i in src.get("allIngredients", [])}
             overlap = len(bom_names & dsld_ingredients)
             if overlap > best_overlap:
@@ -127,7 +175,7 @@ class QuantityEnricher:
                     "full_name": src.get("fullName"),
                 }
 
-        return best if best_overlap >= 3 else None
+        return best if best_overlap >= 2 else None
 
     def _store_amounts(self, product_id: int, boms: list, ingredients: list[dict],
                        match: dict) -> None:
@@ -141,27 +189,34 @@ class QuantityEnricher:
             for comp_row in components:
                 consumed_id = comp_row[0]
                 canonical = conn.execute("""
-                    SELECT ic.Id, ic.Name FROM Ingredient_Canonical ic
+                    SELECT ic.Id, ic.Name, ic.UNII_Code FROM Ingredient_Canonical ic
                     JOIN SKU_To_Canonical stc ON stc.CanonicalId = ic.Id
                     WHERE stc.ProductId = ?
                 """, (consumed_id,)).fetchone()
                 if not canonical:
                     continue
-                _, canonical_name = canonical
+                _, canonical_name, unii_code = canonical
 
-                best_amt = self._match_ingredient_to_amounts(canonical_name, ingredients)
+                best_amt = self._match_ingredient_to_amounts(canonical_name, ingredients, unii_code)
                 if not best_amt:
                     continue
+
+                unit_val = best_amt.get("unit")
+                amount_val = best_amt.get("amount")
+                if unit_val == "NP":
+                    unit_val = None
+                    amount_val = None
 
                 conn.execute("""
                     INSERT OR REPLACE INTO BOM_Component_Quantity
                     (BOMId, ConsumedProductId, Amount, Unit, PerServing, ServingUnit,
-                     DSLD_Label_Id, Off_Market, Source, Confidence)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     ServingsPerContainer, DSLD_Label_Id, Off_Market, Source, Confidence)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     bom_id, consumed_id,
-                    best_amt.get("amount"), best_amt.get("unit"),
+                    amount_val, unit_val,
                     best_amt.get("per_serving"), best_amt.get("serving_unit"),
+                    match.get("servings_per_container"),
                     str(match["dsld_id"]),
                     1 if match.get("off_market") == "1" else 0,
                     "dsld", best_amt.get("confidence", match["confidence"]),
@@ -173,12 +228,35 @@ class QuantityEnricher:
         logger.info(f"product_id={product_id} → stored {stored} quantities from DSLD label {match['dsld_id']}")
 
     def _match_ingredient_to_amounts(self, canonical_name: str,
-                                     amounts: list[dict]) -> dict | None:
-        """Find best-matching ingredient in DSLD amounts list via rapidfuzz."""
+                                     amounts: list[dict],
+                                     unii_code: str | None = None) -> dict | None:
+        """Find best-matching ingredient in DSLD amounts list.
+
+        Tier 1: UNII exact match (confidence 0.95)
+        Tier 2: Case-insensitive name exact match (confidence 0.90)
+        Tier 3: Fuzzy token_set_ratio ≥ 55 (confidence from match score)
+        """
+        # Tier 1: UNII exact match
+        if unii_code:
+            for amt in amounts:
+                if amt.get("unii_code") == unii_code:
+                    result = dict(amt)
+                    result["confidence"] = 0.95
+                    return result
+
+        # Tier 2: Case-insensitive exact name match
+        canonical_lower = canonical_name.lower()
+        for amt in amounts:
+            if canonical_lower == amt["ingredient_name"].lower():
+                result = dict(amt)
+                result["confidence"] = 0.90
+                return result
+
+        # Tier 3: Fuzzy (threshold lowered 70 → 55)
         from rapidfuzz import fuzz, process as fuzz_process
         dsld_names = [a["ingredient_name"] for a in amounts]
         best = fuzz_process.extractOne(canonical_name, dsld_names, scorer=fuzz.token_set_ratio)
-        if best and best[1] >= 70:
+        if best and best[1] >= 55:
             idx = dsld_names.index(best[0])
             return amounts[idx]
         return None

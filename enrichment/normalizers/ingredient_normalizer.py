@@ -99,6 +99,10 @@ class IngredientNormalizer:
         # Tier 1: PubChem
         result = pubchem.lookup(name)
         if result and result["confidence"] >= CONFIDENCE_THRESHOLD:
+            # Override IUPAC-style name with DSLD preferred name if available
+            dsld_check = dsld.search_ingredient(name)
+            if dsld_check and dsld_check.get("name") and len(dsld_check["name"]) <= 60:
+                result["name"] = dsld_check["name"]
             logger.debug(f"PubChem hit for '{name}' (conf={result['confidence']:.2f})")
             return result
 
@@ -129,10 +133,11 @@ class IngredientNormalizer:
         canonical_id = self._get_or_create_canonical(conn, result)
         conn.execute(
             """INSERT OR REPLACE INTO SKU_To_Canonical
-               (ProductId, CanonicalId, ExtractedName, MatchMethod, Confidence)
-               VALUES (?, ?, ?, ?, ?)""",
+               (ProductId, CanonicalId, ExtractedName, MatchMethod, Confidence, MatchScore)
+               VALUES (?, ?, ?, ?, ?, ?)""",
             (product_id, canonical_id, extracted_name,
-             result.get("method", "unknown"), result.get("confidence", 0.0)),
+             result.get("method", "unknown"), result.get("confidence", 0.0),
+             result.get("fuzzy_score")),  # None for non-fuzzy methods
         )
         status = "success" if not result.get("flag") else "fallback"
         self._log(conn, product_id, result.get("method", "unknown"), status,

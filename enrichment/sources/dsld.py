@@ -10,7 +10,10 @@ import sqlite3
 from pathlib import Path
 
 import requests
+from dotenv import load_dotenv
 from rapidfuzz import process as fuzz_process
+
+load_dotenv()
 
 ROOT = Path(__file__).parent.parent.parent
 ENRICHED_DB = ROOT / "db_enriched.sqlite"

@@ -195,6 +195,9 @@ def bootstrap(force: bool = False) -> None:
     conn.commit()
     print("Enriched schema applied.")
 
+    from enrichment.db_migrate_v11 import migrate_v11
+    migrate_v11(conn)
+
     _seed_substitution_rules(conn)
     _seed_confidence_matrix(conn)
 

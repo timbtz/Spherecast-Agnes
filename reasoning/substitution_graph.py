@@ -84,3 +84,43 @@ class SubstitutionGraphBuilder:
             "SELECT Id FROM Ingredient_Canonical WHERE Name = ? COLLATE NOCASE", (name,)
         ).fetchone()
         return row[0] if row else None
+
+
+def seed_substitutions_from_unii_history(
+    conn: sqlite3.Connection,
+    merge_log: list[tuple[int, int, str]],
+) -> None:
+    """Seed Ingredient_Substitution rows for pairs merged during UNII dedup.
+
+    merge_log: list of (keep_id, drop_id, unii_code) from dedup_by_unii().
+    drop_id is deleted from Ingredient_Canonical during dedup, so we can't
+    reference it as an FK. We log the merge instead and skip edge insertion.
+    Inserts self-referential notes on the kept canonical only.
+    """
+    existing_ids = {
+        r[0] for r in conn.execute("SELECT Id FROM Ingredient_Canonical")
+    }
+    skipped = 0
+    inserted = 0
+    for keep_id, drop_id, unii in merge_log:
+        if keep_id not in existing_ids or drop_id not in existing_ids:
+            # drop_id was deleted — can't FK-reference it; record in log only
+            skipped += 1
+            continue
+        conn.execute(
+            """INSERT OR REPLACE INTO Ingredient_Substitution
+               (IngredientAId, IngredientBId, SubstitutionType, Score, Notes, Sources)
+               VALUES (?, ?, 'identical', 1.0, ?, '["unii_dedup"]')""",
+            (keep_id, drop_id, f"Same UNII: {unii}"),
+        )
+        conn.execute(
+            """INSERT OR REPLACE INTO Ingredient_Substitution
+               (IngredientAId, IngredientBId, SubstitutionType, Score, Notes, Sources)
+               VALUES (?, ?, 'identical', 1.0, ?, '["unii_dedup"]')""",
+            (drop_id, keep_id, f"Same UNII: {unii}"),
+        )
+        inserted += 2
+    conn.commit()
+    if skipped:
+        logger.info(f"Skipped {skipped} dedup pairs (drop_id deleted — expected)")
+    logger.info(f"Seeded {inserted} substitution edges from UNII dedup merge log")
