@@ -9,6 +9,8 @@ import logging
 import sqlite3
 from pathlib import Path
 
+from enrichment.sources.molport import MolportClient
+
 ROOT = Path(__file__).parent.parent.parent
 ENRICHED_DB = ROOT / "db_enriched.sqlite"
 
@@ -43,5 +45,60 @@ class CommercialEnricher:
         logger.info("Phase 3 commercial enrichment complete.")
 
     def _enrich_pair(self, supplier_id: int, canonical_id: int, ingredient_name: str) -> None:
-        # TODO Phase 3 sprint: implement Molport lookup, then PureBulk, then Alibaba
-        logger.debug(f"Commercial enrichment not yet implemented for '{ingredient_name}'")
+        conn = sqlite3.connect(self.db_path)
+        canonical = conn.execute(
+            "SELECT CAS_Number, SMILES FROM Ingredient_Canonical WHERE Id = ?",
+            (canonical_id,)
+        ).fetchone()
+        conn.close()
+
+        if not canonical:
+            return
+
+        cas, smiles = canonical
+        molport = MolportClient(self.db_path)
+        rows = molport.lookup_ingredient({"cas_number": cas, "smiles": smiles})
+
+        if not rows:
+            return
+
+        conn = sqlite3.connect(self.db_path)
+        for row in rows:
+            supplier_name = row.get("supplier_name")
+            if not supplier_name:
+                continue
+
+            existing = conn.execute(
+                "SELECT Id FROM Supplier WHERE Name = ?", (supplier_name,)
+            ).fetchone()
+            if existing:
+                molport_supplier_id = existing[0]
+            else:
+                cur = conn.execute(
+                    "INSERT OR IGNORE INTO Supplier (Name, Country) VALUES (?, ?)",
+                    (supplier_name, row.get("country_origin"))
+                )
+                molport_supplier_id = cur.lastrowid or conn.execute(
+                    "SELECT Id FROM Supplier WHERE Name = ?", (supplier_name,)
+                ).fetchone()[0]
+
+            conn.execute(
+                """INSERT OR REPLACE INTO Supplier_Commercial
+                   (SupplierId, CanonicalIngredientId,
+                    Price_USD_Per_KG, Price_Qty_KG, MOQ_KG,
+                    Lead_Time_Days, Country_Origin, Country_Shipping,
+                    Price_Type, Price_Source, Confidence,
+                    Grade_Unverified, Molport_Catalog_Id, Data_Freshness_Days)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    molport_supplier_id, canonical_id,
+                    row.get("price_usd"), row.get("price_qty_kg"), None,
+                    row.get("delivery_days"), row.get("country_origin"), row.get("country_shipping"),
+                    "retail_proxy", "molport", 0.70,
+                    1, row.get("molport_catalog_id"), None,
+                )
+            )
+
+        conn.commit()
+        conn.close()
+        logger.info(f"Commercial: {len(rows)} Molport rows stored for canonical_id={canonical_id} ({ingredient_name})")

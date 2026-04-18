@@ -102,6 +102,45 @@ def migrate_v11(conn: sqlite3.Connection) -> None:
     # Ingredient_Substitution
     _add_col("Ingredient_Substitution", "Caveats", "TEXT")
 
+    # Views (CREATE VIEW IF NOT EXISTS is idempotent)
+    conn.executescript("""
+        DROP VIEW IF EXISTS v_product_channel;
+        CREATE VIEW v_product_channel AS
+        SELECT
+            Id, SKU, CompanyId, Type,
+            CASE
+                WHEN Type != 'finished-good'             THEN NULL
+                WHEN SKU LIKE 'FG-walmart-%'             THEN 'walmart'
+                WHEN SKU LIKE 'FG-target-%'              THEN 'target'
+                WHEN SKU LIKE 'FG-cvs-%'                 THEN 'cvs'
+                WHEN SKU LIKE 'FG-walgreens-%'           THEN 'walgreens'
+                WHEN SKU LIKE 'FG-costco-%'              THEN 'costco'
+                WHEN SKU LIKE 'FG-sams-%'                THEN 'sams-club'
+                WHEN SKU LIKE 'FG-amazon-%'              THEN 'amazon'
+                WHEN SKU LIKE 'FG-iherb-%'               THEN 'iherb'
+                WHEN SKU LIKE 'FG-the-vitamin-shoppe-%'  THEN 'vitamin-shoppe'
+                WHEN SKU LIKE 'FG-thrive%'               THEN 'thrive-market'
+                WHEN SKU LIKE 'FG-vitacost-%'            THEN 'vitacost'
+                WHEN SKU LIKE 'FG-gnc-%'                 THEN 'gnc'
+                ELSE NULL
+            END AS Channel
+        FROM Product;
+
+        DROP VIEW IF EXISTS v_bom_signature;
+        CREATE VIEW v_bom_signature AS
+        SELECT
+            b.Id      AS BOMId,
+            p.CompanyId,
+            p.Id      AS ProductId,
+            GROUP_CONCAT(bc.ConsumedProductId ORDER BY bc.ConsumedProductId) AS bom_sig
+        FROM BOM b
+        JOIN Product p  ON p.Id  = b.ProducedProductId
+        JOIN BOM_Component bc ON bc.BOMId = b.Id
+        WHERE p.Type = 'finished-good'
+        GROUP BY b.Id, p.CompanyId, p.Id;
+    """)
+    print("  ✓ views v_product_channel, v_bom_signature created")
+
     conn.commit()
 
     try:

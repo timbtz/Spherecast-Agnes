@@ -9,10 +9,10 @@ ENRICHED_DB = ROOT / "db_enriched.sqlite"
 logger = logging.getLogger("agnes.consolidation_scorer")
 
 # Scoring weights — must sum to 1.0
-W_COMPANY_COUNT = 0.40
-W_BOM_COUNT = 0.25
-W_SUPPLIER_CONCENTRATION = 0.20
-W_COMPLIANCE_HOMOGENEITY = 0.15
+W_COMPANY_SCORE = 0.40
+W_BOM_SCORE = 0.25
+W_FRAGMENTATION = 0.20    # unique_sku_count / max
+W_SUPPLIER_SPREAD = 0.15  # distinct_supplier_count / max
 
 
 class ConsolidationScorer:
@@ -36,9 +36,25 @@ class ConsolidationScorer:
 
         max_boms = conn.execute(
             """SELECT MAX(c) FROM (
-               SELECT COUNT(DISTINCT bc.BOMId) AS c
+               SELECT COUNT(DISTINCT vbs.CompanyId || '|' || vbs.bom_sig) AS c
                FROM SKU_To_Canonical stc
                JOIN BOM_Component bc ON bc.ConsumedProductId = stc.ProductId
+               JOIN v_bom_signature vbs ON vbs.BOMId = bc.BOMId
+               GROUP BY stc.CanonicalId)"""
+        ).fetchone()[0] or 1
+
+        max_unique_skus = conn.execute(
+            """SELECT MAX(c) FROM (
+               SELECT COUNT(DISTINCT stc.ProductId) AS c
+               FROM SKU_To_Canonical stc
+               GROUP BY stc.CanonicalId)"""
+        ).fetchone()[0] or 1
+
+        max_supplier_count = conn.execute(
+            """SELECT MAX(c) FROM (
+               SELECT COUNT(DISTINCT sp.SupplierId) AS c
+               FROM SKU_To_Canonical stc
+               JOIN Supplier_Product sp ON sp.ProductId = stc.ProductId
                GROUP BY stc.CanonicalId)"""
         ).fetchone()[0] or 1
 
@@ -48,7 +64,7 @@ class ConsolidationScorer:
             if stats["company_count"] < 2:
                 continue  # No consolidation opportunity with only 1 company
 
-            score = self._compute_score(stats, max_companies, max_boms)
+            score = self._compute_score(stats, max_companies, max_boms, max_unique_skus, max_supplier_count)
             self._upsert_opportunity(conn, canonical_id, stats, score)
             scored += 1
 
@@ -67,9 +83,17 @@ class ConsolidationScorer:
         ).fetchone()[0]
 
         bom_count = conn.execute(
-            """SELECT COUNT(DISTINCT bc.BOMId)
+            """SELECT COUNT(DISTINCT vbs.CompanyId || '|' || vbs.bom_sig)
                FROM SKU_To_Canonical stc
                JOIN BOM_Component bc ON bc.ConsumedProductId = stc.ProductId
+               JOIN v_bom_signature vbs ON vbs.BOMId = bc.BOMId
+               WHERE stc.CanonicalId = ?""",
+            (canonical_id,),
+        ).fetchone()[0]
+
+        unique_sku_count = conn.execute(
+            """SELECT COUNT(DISTINCT stc.ProductId)
+               FROM SKU_To_Canonical stc
                WHERE stc.CanonicalId = ?""",
             (canonical_id,),
         ).fetchone()[0]
@@ -98,44 +122,44 @@ class ConsolidationScorer:
         return {
             "company_count": company_count,
             "bom_count": bom_count,
+            "unique_sku_count": unique_sku_count,
             "supplier_count": supplier_count,
             "best_supplier_id": best_supplier[0] if best_supplier else None,
             "best_supplier_coverage": best_supplier[1] if best_supplier else 0,
         }
 
-    def _compute_score(self, stats: dict, max_companies: int, max_boms: int) -> float:
+    def _compute_score(self, stats: dict, max_companies: int, max_boms: int,
+                       max_unique_skus: int, max_supplier_count: int) -> float:
         company_score = stats["company_count"] / max_companies
         bom_score = stats["bom_count"] / max_boms
-
-        # Supplier concentration: fewer suppliers covering more companies = higher score
-        if stats["supplier_count"] > 0:
-            supplier_score = 1.0 - (stats["supplier_count"] / max(stats["company_count"], 1))
-            supplier_score = max(0.0, min(1.0, supplier_score))
-        else:
-            supplier_score = 0.0
-
-        # Compliance homogeneity: placeholder 0.5 until Phase 3 data available
-        compliance_score = 0.5
+        fragmentation_score = stats["unique_sku_count"] / max_unique_skus
+        supplier_spread_score = stats["supplier_count"] / max(max_supplier_count, 1)
 
         return (
-            W_COMPANY_COUNT * company_score
-            + W_BOM_COUNT * bom_score
-            + W_SUPPLIER_CONCENTRATION * supplier_score
-            + W_COMPLIANCE_HOMOGENEITY * compliance_score
+            W_COMPANY_SCORE * company_score
+            + W_BOM_SCORE * bom_score
+            + W_FRAGMENTATION * fragmentation_score
+            + W_SUPPLIER_SPREAD * supplier_spread_score
         )
 
     def _upsert_opportunity(self, conn: sqlite3.Connection, canonical_id: int,
                              stats: dict, score: float) -> None:
         conn.execute(
-            """INSERT OR REPLACE INTO Consolidation_Opportunity
+            "DELETE FROM Consolidation_Opportunity WHERE CanonicalIngredientId = ?",
+            (canonical_id,)
+        )
+        conn.execute(
+            """INSERT INTO Consolidation_Opportunity
                (CanonicalIngredientId, Company_Count, BOM_Count, Current_Supplier_Count,
-                Consolidation_Score, Recommended_SupplierId)
-               VALUES (?, ?, ?, ?, ?, ?)""",
+                Unique_SKU_Count, Score_Formula_Component, Consolidation_Score, Recommended_SupplierId)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 canonical_id,
                 stats["company_count"],
                 stats["bom_count"],
                 stats["supplier_count"],
+                stats["unique_sku_count"],
+                round(score, 4),
                 round(score, 4),
                 stats["best_supplier_id"],
             ),

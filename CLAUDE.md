@@ -9,11 +9,11 @@
 | Layer | Status | Notes |
 |---|---|---|
 | `schema/enriched_schema.sql` | ✅ v1.1 | 15 new columns; Supplier_Commercial.Confidence TEXT→REAL fixed |
-| `db_enriched.sqlite` | ✅ v1.1 — all phases run | 112 SMILES, 44 UNII codes, 19 dedup merges, 515 BOM rows, 126 compliance rows |
+| `db_enriched.sqlite` | ✅ v1.1 — all phases run | 112 SMILES, 44 UNII codes, 515 BOM rows, 126 compliance rows, 129 CO rows (formula fixed), 4 sub edges; MatchScore backfilled (854 rows) |
 | Phase 1 — Ingredient Identity | ✅ Complete | Display name fix + Sucralose guard; SMILES/UNII backfill done |
 | Phase 2 — BOM Quantities | ✅ Complete | 515 rows, 87/149 FG covered (58%); fingerprint match: brand+ingredient query + overlap≥2 |
 | Phase 3 — Commercial/Compliance | ✅ Complete | 126 rows, 66 products, 9 cert types; fixed stmt.notes key + Phase 2 label reuse |
-| Phase 4 — Reasoning/Proposals | ⏳ Not started | Blocked by Phases 2+3 + ANTHROPIC_API_KEY in .env |
+| Phase 4 — Reasoning/Proposals | ⏳ Scorer ✅ formula fixed, proposals blocked | 129 CO rows; correct formula (fragmentation+supplier_spread); _upsert dedup bug fixed; proposals need ANTHROPIC_API_KEY |
 | `enrichment/sources/pubchem.py` | ✅ Implemented | Added get_isomeric_smiles(); rate-limited (4.5 req/sec), cache-first |
 | `enrichment/sources/dsld.py` | ✅ Implemented | DSLD v9, cached |
 | `enrichment/sources/molport.py` | ✅ Stub | Graceful no-op if MOLPORT_API_KEY absent; CAS→SMILES→supplier chain |
@@ -22,7 +22,9 @@
 | `enrichment/run_dedup.py` | ✅ New | UNII dedup + substitution seeding; run after backfill_unii |
 | `enrichment/sources/rxnorm.py` | ❌ Missing | Low priority — narrow use (drug-class ingredients only) |
 | `enrichment/sources/fdc.py` | ❌ Missing | Low priority — only useful for ~5 food-macro SKUs |
-| `reasoning/consolidation_scorer.py` | ⚠️ Formula mismatch | Uses compliance_homogeneity weight; PRD §8 uses fragmentation + supplier_spread |
+| `reasoning/consolidation_scorer.py` | ✅ Fixed + run | Formula: company×0.40 + bom×0.25 + fragmentation×0.20 + supplier_spread×0.15; 129 rows scored |
+| `reasoning/substitution_graph.py` | ✅ Run | 4 edges from 2/40 rules; 38 rules skipped due to canonical name mismatch |
+| `enrichment/enrichers/commercial_enricher.py` | ✅ _enrich_pair wired | MolportClient integration complete; no-ops when MOLPORT_API_KEY absent |
 
 ---
 
@@ -70,7 +72,13 @@ Fields to add per PRD §7:
 
 **[FIXED]** DSLD client: added load_dotenv() so API key loads from .env in direct script runs.
 
+**[FIXED]** Consolidation scorer formula: replaced compliance_homogeneity (placeholder 0.5) + inverted supplier_concentration with fragmentation (unique_sku_count/max, W=0.20) + supplier_spread (supplier_count/max, W=0.15). 129 rows scored; Vitamin C top-ranked (25 cos, score=0.893). Also fixed _upsert_opportunity to DELETE+INSERT (no UNIQUE constraint on CanonicalIngredientId — INSERT OR REPLACE was creating duplicates on re-run).
+
 **[DESIGN DECISION]** Consolidation scoring: Option C chosen (formula baseline + LLM adjustment ±0.10 for top-50 only). Formula weights: company_score 0.40, bom_score 0.25, fragmentation 0.20, supplier_spread 0.15.
+
+**[KNOWN LIMIT]** SubstitutionGraphBuilder: 38/40 rules skip due to canonical name mismatch (e.g. rule uses "Cholecalciferol" but canonical is stored as "Vitamin D"). Rules use COLLATE NOCASE exact match. Fix: update Ingredient_Substitution_Rule.Name_A/B to match Ingredient_Canonical.Name exactly.
+
+**[KNOWN LIMIT]** DSLD UNII backfill: 0 new codes added despite DSLD_API_KEY present. DSLD ingredient rows have sparse uniiCode coverage for excipients/trade-name ingredients. The 44 existing codes came from Phase 1 DSLD product search, not this backfill path.
 
 ---
 
