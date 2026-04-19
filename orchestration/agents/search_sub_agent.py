@@ -31,6 +31,10 @@ Each element of the array MUST use exactly these field names (no synonyms, no va
   - website               : string  (product or supplier URL)
   - grade                 : string  (e.g. "supplement", "USP", "lab-reagent", "industrial".
                                       Use "lab-reagent" for Sigma/Aldrich/Thermo-Fisher style listings.)
+  - evidence_snippet      : string  (a brief quote or paraphrase from the source that
+                                      backs the price/MOQ/country claim, <= 200 chars.
+                                      This is our audit trail — make it verifiable against
+                                      the website field. Empty string if no direct quote is available.)
 
 If a field is unknown, use an empty string "" (or [] for certifications). Never use null.
 
@@ -43,7 +47,8 @@ Example of a valid response:
     "country": "USA",
     "certifications": ["NSF", "GMP"],
     "website": "https://purebulk.com/products/example",
-    "grade": "supplement"
+    "grade": "supplement",
+    "evidence_snippet": "PureBulk lists Vitamin C at $22-28/kg with 25kg MOQ on their wholesale page."
   }
 ]
 """

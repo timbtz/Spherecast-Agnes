@@ -5,14 +5,18 @@ import logging
 import re
 import sqlite3
 from pathlib import Path
+from urllib.parse import urlparse
 from dotenv import load_dotenv
 load_dotenv()
+
+from enrichment.enrichers.country_iso import normalize_country as iso_normalize_country
 
 ROOT = Path(__file__).parent.parent.parent
 ENRICHED_DB = ROOT / "db_enriched.sqlite"
 logger = logging.getLogger("agnes.supplier_web_enricher")
 
 _CONFIDENCE_WEB = 0.65
+_EVIDENCE_MAX_LEN = 200
 
 # Field-name aliases — the model sometimes free-styles these even when the
 # system prompt pins the schema. Try each in order.
@@ -24,6 +28,8 @@ _URL_KEYS = ("website", "contact_website", "url", "product_url", "source_url",
              "link")
 _CERT_KEYS = ("certifications", "certs", "certificates", "certification")
 _GRADE_KEYS = ("grade", "purity", "spec", "specification")
+_EVIDENCE_KEYS = ("evidence_snippet", "evidence", "snippet", "quote",
+                  "source_snippet", "notes")
 
 # Currency conversion to USD. Update annually; sandbox-grade approximations.
 _FX_TO_USD = {
@@ -148,18 +154,83 @@ def _normalize_certs(raw_certs) -> list[str]:
 
 
 def _normalize_country(raw_country) -> str | None:
-    """Strip parenthetical clarifications, take first word/token, cap at 32 chars."""
-    if not raw_country:
+    """Resolve to ISO-3166 display form. Returns None for unknown inputs.
+
+    Wraps enrichment.enrichers.country_iso.normalize_country so callers don't
+    have to import the helper directly. Unknown/unresolved countries return
+    None; the caller should WARN and persist NULL rather than writing garbage.
+    """
+    resolved = iso_normalize_country(raw_country)
+    if raw_country and not resolved:
+        logger.warning(f"  country: unresolved input {raw_country!r} — persisting NULL")
+    return resolved
+
+
+def _hostname(url: str | None) -> str | None:
+    """Return the lowercase hostname of a URL, or None if unparseable."""
+    if not url:
         return None
-    s = str(raw_country).strip()
-    # "USA (implied)" → "USA"; "USA (Misso..." → "USA"
-    s = re.split(r"[(\[]", s)[0].strip().rstrip(",;.")
-    return s[:32] if s else None
+    try:
+        host = urlparse(str(url)).hostname
+    except Exception:
+        return None
+    return host.lower() if host else None
+
+
+def _load_blocklist(conn: sqlite3.Connection) -> set[str]:
+    """Fetch the full URL_Blocklist once per run. Cheap (< 100 rows)."""
+    try:
+        return {r[0] for r in conn.execute("SELECT Hostname FROM URL_Blocklist").fetchall()}
+    except sqlite3.OperationalError:
+        # Table may not exist on older DBs (pre-migrate_provenance). Fail-open.
+        return set()
+
+
+def _hostname_blocked(url: str | None, blocklist: set[str]) -> bool:
+    """Match url's host against blocklist, handling bare-domain / www. / subdomains."""
+    host = _hostname(url)
+    if not host or not blocklist:
+        return False
+    if host in blocklist:
+        return True
+    # Also match without a leading 'www.' and against bare-domain form
+    stripped = host[4:] if host.startswith("www.") else host
+    if stripped in blocklist:
+        return True
+    # Finally match any parent domain (e.g. host=news.reddit.com, blocked=reddit.com)
+    parts = stripped.split(".")
+    for i in range(1, len(parts) - 1):
+        if ".".join(parts[i:]) in blocklist:
+            return True
+    return False
+
+
+def _classify_provenance(url: str | None, country_ok: bool, evidence: str | None) -> str:
+    """First-cut Provenance_Confidence. The archetype classifier in the next
+    commit refines 'directory_listing' vs 'website_explicit' based on the host.
+
+    - url + country + evidence  → directory_listing (upgradeable)
+    - url + country only         → directory_listing
+    - url only, no country       → model_inferred
+    - country only, no url       → model_inferred
+    - neither                    → unknown
+    """
+    if url and country_ok:
+        return "directory_listing"
+    if url or country_ok:
+        return "model_inferred"
+    return "unknown"
 
 
 class SupplierWebEnricher:
     def __init__(self, db_path: str | Path = ENRICHED_DB):
         self.db_path = str(db_path)
+        self._blocklist_cache: set[str] | None = None
+
+    def _get_blocklist(self, conn: sqlite3.Connection) -> set[str]:
+        if self._blocklist_cache is None:
+            self._blocklist_cache = _load_blocklist(conn)
+        return self._blocklist_cache
 
     def _get_targets(self) -> list[tuple[int, str, str | None]]:
         """Return (canonical_id, name, grade_flag) for canonicals with no web-search commercial rows."""
@@ -214,7 +285,7 @@ class SupplierWebEnricher:
         supplier_id: int, canonical_id: int,
         parsed: dict, source_url: str | None
     ) -> bool:
-        """Write a Supplier_Commercial row. Returns True on success, False if rejected by QC."""
+        """Write a Supplier_Commercial row. Returns True on success, False if rejected."""
         # Defensive field-name lookups (model may free-style key names)
         price_raw = _first(parsed, _PRICE_KEYS)
         moq_raw = _first(parsed, _MOQ_KEYS)
@@ -222,12 +293,25 @@ class SupplierWebEnricher:
         country = _normalize_country(parsed.get("country"))
         certs = _normalize_certs(_first(parsed, _CERT_KEYS))
         purity_qualifier = ", ".join(certs[:3]) if certs else None
+        evidence_raw = _first(parsed, _EVIDENCE_KEYS)
+        evidence = (str(evidence_raw).strip()[:_EVIDENCE_MAX_LEN]) if evidence_raw else None
 
         price = _parse_price(price_raw)
         moq = _parse_moq(moq_raw)
 
-        # QC: outlier check against existing prices for the same ingredient.
-        # Skip the row entirely if both price is set AND it's a wild outlier.
+        # --- Provenance gate 1: URL blocklist.
+        # Reject the whole row if the source URL is on a known non-supplier
+        # domain list (wikipedia, reddit, linkedin, placeholders, etc.).
+        if url:
+            blocklist = self._get_blocklist(conn)
+            if _hostname_blocked(url, blocklist):
+                logger.warning(
+                    f"  blocklist reject: canonical_id={canonical_id} "
+                    f"supplier_id={supplier_id} url={url!r}"
+                )
+                return False
+
+        # --- Provenance gate 2: outlier QC against existing prices.
         if price is not None:
             baseline = self._existing_prices_for_ingredient(conn, canonical_id)
             if self._is_outlier(price, baseline):
@@ -237,13 +321,18 @@ class SupplierWebEnricher:
                 )
                 return False
 
+        # --- Provenance gate 3: classify confidence on write.
+        provenance = _classify_provenance(url, country is not None, evidence)
+
         conn.execute(
             """INSERT OR REPLACE INTO Supplier_Commercial
                (SupplierId, CanonicalIngredientId, Price_USD_Per_KG, MOQ_KG,
                 Country_Origin, Price_Type, Price_Source, Confidence,
-                Source_URL, Last_Updated, Grade_Unverified, Purity_Qualifier)
-               VALUES (?, ?, ?, ?, ?, 'web_search', 'google_search', ?, ?, datetime('now'), 1, ?)""",
-            (supplier_id, canonical_id, price, moq, country, _CONFIDENCE_WEB, url, purity_qualifier)
+                Source_URL, Last_Updated, Grade_Unverified, Purity_Qualifier,
+                Provenance_Confidence, Evidence_Snippet)
+               VALUES (?, ?, ?, ?, ?, 'web_search', 'google_search', ?, ?, datetime('now'), 1, ?, ?, ?)""",
+            (supplier_id, canonical_id, price, moq, country, _CONFIDENCE_WEB, url,
+             purity_qualifier, provenance, evidence)
         )
         return True
 
