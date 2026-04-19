@@ -366,7 +366,10 @@ def _fuzzy_match_supplier(
 
     Both input and candidates are normalised (lowercase, strip corporate
     suffixes + punctuation, collapse whitespace) before scoring. Uses
-    rapidfuzz.token_set_ratio which is order-insensitive.
+    rapidfuzz.token_sort_ratio — permissive for reordering ("ACME Inc USA"
+    ↔ "USA ACME Inc") but correctly conservative for subset-extension
+    ("Fisher Scientific" ≠ "Thermo Fisher Scientific"). token_set_ratio
+    scores 100 on that subset case and would collapse different companies.
     """
     if not existing:
         return None
@@ -377,7 +380,7 @@ def _fuzzy_match_supplier(
     norm_existing = [(eid, ename, _normalize_supplier_name(ename)) for eid, ename in existing]
     norm_list = [t[2] for t in norm_existing]
     match = process.extractOne(
-        norm_name, norm_list, scorer=fuzz.token_set_ratio, score_cutoff=threshold
+        norm_name, norm_list, scorer=fuzz.token_sort_ratio, score_cutoff=threshold
     )
     if not match:
         return None
