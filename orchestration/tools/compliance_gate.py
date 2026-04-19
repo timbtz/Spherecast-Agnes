@@ -3,13 +3,58 @@ Deterministic tool: check whether candidate suppliers satisfy compliance require
 for all products using the target ingredient.
 
 Returns a list of qualified (supplier, product) pairs that pass all gates.
+
+This is the legacy binary gate used by new_ingredient_research.yaml. The
+sophisticated ComplianceReasonerTool replaces it in supplier_fallout and
+substitution_discovery pipelines. When ALL candidates fail here we emit a
+Refusal_Log entry so new_ingredient_research still produces first-class
+refusal output — mirroring the reasoner's behavior so the refusal dashboards
+and proposal narrative see both pipelines' gate failures.
 """
+import logging
 import sqlite3
 
 from orchestration.api.agnes_context import AgnesContext
 
+logger = logging.getLogger("agnes.compliance_gate")
+
 # Certifications that must be supplied by the ingredient supplier (not just claimed on label)
 _SUPPLIER_CERTS = {"NSF", "USP", "InformedSport", "BSCG"}
+
+
+def _log_refusal(
+    ctx: AgnesContext,
+    canonical_id: int | None,
+    ingredient_name: str,
+    justification: str,
+    blocking_factors: list[str],
+    unblock_hint: str,
+) -> None:
+    """Persist a gate-failed refusal so downstream narrative writers (and the
+    refusal dashboard) can surface it. Mirrors the pattern in
+    compliance_reasoner_tool and the no-data explainers."""
+    try:
+        conn = sqlite3.connect(str(ctx.enriched_db_path))
+        conn.execute(
+            """INSERT OR IGNORE INTO Refusal_Log
+               (CanonicalId, IngredientName, Decision, Justification,
+                Confidence, BlockingFactors, UnblockHint, RunId)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (
+                canonical_id,
+                ingredient_name or "(unspecified)",
+                "refuse",
+                justification,
+                1.0,
+                str(blocking_factors),
+                unblock_hint,
+                getattr(ctx, "run_id", None),
+            ),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as err:
+        logger.warning(f"Refusal_Log write failed in compliance_gate: {err}")
 
 
 def run(ctx: AgnesContext) -> dict:
@@ -76,6 +121,43 @@ def run(ctx: AgnesContext) -> dict:
             disqualified.append(entry)
 
     conn.close()
+
+    # If every candidate failed, emit a refusal event so new_ingredient_research
+    # surfaces "gate-failed" as a first-class outcome instead of silently
+    # handing the proposal writer an empty qualified list.
+    if alternatives and not qualified:
+        ingredient_name = (ctx.trigger_payload.get("ingredient_name") or "").strip()
+        reasons: list[str] = []
+        low_confidence = sum(
+            1 for s in alternatives if (s.get("Confidence") or 0) < 0.6
+        )
+        if low_confidence:
+            reasons.append(
+                f"{low_confidence}/{len(alternatives)} candidate suppliers "
+                f"below 0.6 confidence floor"
+            )
+        if not products:
+            reasons.append(
+                "no downstream products reference this canonical ingredient"
+            )
+        justification = (
+            f"All {len(alternatives)} candidate suppliers disqualified by "
+            f"the compliance gate for {ingredient_name or 'the requested ingredient'}. "
+            + (" ".join(reasons) if reasons else "")
+        ).strip()
+        _log_refusal(
+            ctx=ctx,
+            canonical_id=canonical_id,
+            ingredient_name=ingredient_name,
+            justification=justification,
+            blocking_factors=reasons or ["gate_failed"],
+            unblock_hint=(
+                "Raise supplier confidence via the supplier-verify pass, "
+                "or re-enrich with supplier_web_enricher to surface "
+                "additional candidates before retrying."
+            ),
+        )
+
     return {
         "qualified": qualified,
         "disqualified": disqualified,
