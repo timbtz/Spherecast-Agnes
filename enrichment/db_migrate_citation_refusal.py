@@ -24,7 +24,7 @@ def migrate(db_path: Path = DB) -> None:
 
         CREATE TABLE IF NOT EXISTS Refusal_Log (
             Id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            CanonicalId     INTEGER NOT NULL,
+            CanonicalId     INTEGER,
             IngredientName  TEXT NOT NULL,
             Decision        TEXT NOT NULL,
             Justification   TEXT,
@@ -38,6 +38,42 @@ def migrate(db_path: Path = DB) -> None:
         CREATE INDEX IF NOT EXISTS idx_claim_citation_opp ON Claim_Citation(OpportunityId);
         CREATE INDEX IF NOT EXISTS idx_refusal_canonical ON Refusal_Log(CanonicalId);
     """)
+
+    # Relax legacy NOT NULL on Refusal_Log.CanonicalId so coverage-gap refusals
+    # (where the ingredient isn't in Ingredient_Canonical at all) can be
+    # recorded by no_data_explainer / no_opportunity_explainer. Earlier schema
+    # made this NOT NULL, which silently dropped rows via INSERT OR IGNORE.
+    # This block is idempotent — it only rebuilds if the old constraint is
+    # still present.
+    refusal_cols = conn.execute("PRAGMA table_info(Refusal_Log)").fetchall()
+    canonical_col = next((c for c in refusal_cols if c[1] == "CanonicalId"), None)
+    if canonical_col is not None and canonical_col[3] == 1:  # notnull flag
+        conn.executescript("""
+            BEGIN;
+            CREATE TABLE Refusal_Log_new (
+                Id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                CanonicalId     INTEGER,
+                IngredientName  TEXT NOT NULL,
+                Decision        TEXT NOT NULL,
+                Justification   TEXT,
+                Confidence      REAL,
+                BlockingFactors TEXT,
+                UnblockHint     TEXT,
+                RunId           TEXT,
+                CreatedAt       TEXT DEFAULT (datetime('now'))
+            );
+            INSERT INTO Refusal_Log_new
+              (Id, CanonicalId, IngredientName, Decision, Justification,
+               Confidence, BlockingFactors, UnblockHint, RunId, CreatedAt)
+              SELECT Id, CanonicalId, IngredientName, Decision, Justification,
+                     Confidence, BlockingFactors, UnblockHint, RunId, CreatedAt
+              FROM Refusal_Log;
+            DROP TABLE Refusal_Log;
+            ALTER TABLE Refusal_Log_new RENAME TO Refusal_Log;
+            CREATE INDEX IF NOT EXISTS idx_refusal_canonical ON Refusal_Log(CanonicalId);
+            COMMIT;
+        """)
+        print("Relaxed Refusal_Log.CanonicalId NOT NULL constraint")
 
     existing = conn.execute("SELECT COUNT(*) FROM Refusal_Log").fetchone()[0]
     if existing == 0:
