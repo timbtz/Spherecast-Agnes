@@ -7,6 +7,7 @@
 This README is a reflective write-up of what we attempted, what we actually shipped, where we fell short, and what we would change given another run at it. The live documentation of the system itself (setup, endpoints, schema) lives in the repo's main `README.md` and `CLAUDE.md`; this document is the judging-pass companion.
 
 ---
+![UI](UI.png)
 
 ## 1. General approach
 
