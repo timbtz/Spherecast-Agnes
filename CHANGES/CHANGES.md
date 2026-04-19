@@ -190,3 +190,142 @@ USD/kg prices, provenance (`google_search`), and outlier QC active.
 Node output for `price_monitor`'s `fetch-prices` now carries a structured
 reconciliation breakdown (`stale_total`, `found_ingredients`, `failed_ingredients`)
 so the pipeline is self-diagnosing rather than silently zero-result.
+
+## 11. Provenance hardening: staleness, countries, dedup, corroboration (2026-04-19)
+
+**Problem found during an audit of the price_monitor results:** three questions
+had no clean answer against the prior baseline — (1) how is "stale" being counted
+and is it uniform across ingredient classes, (2) how vetted is LLM-populated
+data like country of origin, and (3) where do new suppliers actually come from
+and how do we catch hallucinated ones. The existing schema had no column to
+record a row's evidentiary tier, no blocklist for non-supplier domains, no
+normaliser for country strings, and no cross-run accounting for the same
+supplier showing up under spelling variations.
+
+**Changes shipped across five commits** (`ef3673b` → `8ee2ace`):
+
+### 11.1. Schema migration (`ef3673b`)
+`enrichment/db_migrate_provenance.py` — idempotent. Adds to
+`Supplier_Commercial`: `Provenance_Confidence`, `Evidence_Snippet`,
+`URL_Archetype`, `URL_Health`, `Corroboration_Score`. Adds to
+`Ingredient_Canonical`: `Category`, `Usage_Tier`. Creates `URL_Blocklist`
+(seeded with 28 non-supplier domains: wikipedia, reddit, linkedin,
+vertexaisearch.cloud.google.com grounding redirects, etc.) and
+`Supplier_Master` (queue for trade-register verification).
+
+Backfilled against current DB: `Usage_Tier` populated for all 250 canonicals
+(top 50 by BOM appearance = tier 1, next 50 = tier 2, rest = tier 3);
+`Category` populated for 165 of 250 from the existing `Function` column.
+
+### 11.2. Per-category staleness TTL (`81d83ae`)
+`orchestration/tools/price_staleness_checker.py` rewritten. Replaces the
+single 7-day window with a category-keyed dict — `commodity_excipient=14`,
+`mineral/protein=10`, `botanical=7`, `vitamin/api=5`, default=7 — plus ±12h
+jitter so a batch refresh doesn't create a thundering-herd on the next run.
+Adds a `_classify_timestamp` guard that flags forward-dated or >2-year-old
+`Last_Updated` values as `timestamp_invalid` rather than treating them as
+fresh. Splits the result into `never_refreshed` / `stale` /
+`refresh_failed_recently` buckets. Sorts by `Usage_Tier` first so tier-1
+ingredients drain the queue before tier-3 when the batch is capped.
+
+### 11.3. Provenance gates on write (`0200994`)
+`enrichment/enrichers/country_iso.py` — hand-curated ISO-3166 allow-list
+(~60 countries) with alias resolution (USA / US / U.S. / United States all
+collapse to `"USA"`). Unknown inputs return `None`; caller WARN-logs and
+persists `NULL` rather than the garbage string.
+
+`enrichment/enrichers/supplier_web_enricher.py` gained:
+  - `_load_blocklist` / `_hostname_blocked` with parent-domain walk
+    (e.g. `news.reddit.com` matches `reddit.com`), rejecting the entire row
+    before a Supplier_Commercial insert.
+  - `_EVIDENCE_KEYS` alias tuple + 200-char capture into `Evidence_Snippet`
+    on every write — the audit trail for each row, paired with its
+    `Source_URL`.
+
+`orchestration/agents/search_sub_agent.py` — schema extended with
+`evidence_snippet: string (<=200 chars)` and example updated. The model is
+now asked for the substring it used to derive the claim, not just the
+claim itself.
+
+### 11.4. Dedup + archetype + corroboration (`afbbf60`)
+`supplier_web_enricher.py` continued:
+  - `_CORP_SUFFIX_RE` + `_normalize_supplier_name` strip Inc / Ltd / LLC /
+    GmbH / AG / SA / Pvt / Pty / etc., plus punctuation, before comparison.
+  - `_fuzzy_match_supplier` uses `rapidfuzz.process.extractOne` with
+    `token_set_ratio` and a 90-point cutoff. `_upsert_supplier` now does
+    exact → fuzzy → insert, so `"PureBulk, Inc."` and `"Purebulk Inc"`
+    collapse to one SupplierId.
+  - `_ARCHETYPE_HOSTS` — hostname → archetype table covering ~45 domains:
+    directory_listing (indiamart, alibaba, tradeindia, exportersindia),
+    distributor (bulksupplements, purebulk, univarsolutions, bulkfoods),
+    lab_reagent (sigmaaldrich, fishersci, thermofisher), and
+    manufacturer_direct (jungbunzlauer, chem-impex, rpicorp, DSM, BASF,
+    Cargill, ADM, Roquette, Ingredion). Parent-domain walk handles subdomains.
+  - `_classify_provenance` — decision tree producing `vendor_verified >
+    website_explicit > directory_listing > model_inferred > unknown`.
+    `manufacturer_direct` archetype lifts to `website_explicit`; everything
+    else with a resolved country caps at `directory_listing`.
+
+`enrichment/backfill_provenance.py` — four-pass migration script. Archetype,
+provenance, and corroboration passes are offline and idempotent;
+`url_health` pass is async (httpx, 10 concurrent, 2s timeout) and gated
+behind `--check-urls`.
+
+Ran against current DB: 169 rows re-classified, 138 suppliers scored.
+Corroboration formula: `max(0, distinct_hosts + distinct_dates - 2)`.
+
+### 11.5. Two-pass verification + trade-register stub (`8ee2ace`)
+`enrichment/verify_suppliers.py` — two independent passes:
+
+  - `homepage_verify` (network, opt-in via `--pass homepage`): picks top-N
+    suppliers by corroboration, fetches each one's dominant host's homepage
+    (4s timeout, 8 concurrent), and checks whether the normalised supplier
+    name appears in the first 4KB of body text. On match, lifts
+    `Provenance_Confidence` on every row of that supplier from
+    `website_explicit` / `directory_listing` → `vendor_verified`.
+  - `trade_register_stub` (offline): for suppliers with
+    `Corroboration_Score >= 3`, upserts a `Supplier_Master` row with
+    `Vetted=0`, `Vetted_Source='pending_manual_review'`. A real batch
+    job would consume this queue via OpenCorporates / D&B / GLEIF.
+
+Ran `trade_register` pass — 2 suppliers enqueued (Chem-Impex, Sinofi
+Ingredients, both score=3). Re-run is clean (2 refreshed, 0 new).
+
+### 11.6. Final verification state (2026-04-19)
+
+Schema: all 7 new columns present, `URL_Blocklist` 28 entries,
+`Supplier_Master` 2 queued.
+
+`Usage_Tier`: 50 / 50 / 150 across 250 canonicals.
+`Category`: 65 commodity_excipient, 36 mineral, 35 botanical, 19 vitamin,
+10 protein, 85 unknown (ingredients with empty/novel `Function` strings).
+
+`URL_Archetype` post-backfill (169 google_search rows):
+`directory_listing=58 / distributor=35 / manufacturer_direct=8 /
+lab_reagent=4 / unknown=64`.
+
+`Provenance_Confidence` (169 google_search rows):
+`directory_listing=140 / model_inferred=21 / website_explicit=8 /
+vendor_verified=0`. vendor_verified stays at 0 until the homepage pass runs
+against a live network, which is intentionally not triggered in the default
+pipeline.
+
+Top-5 corroboration: Sinofi Ingredients (3), Chem-Impex (3),
+BulkSupplements.com (2), Univar Solutions (2), TALSEN CHEM (1).
+
+Unit-style checks: `country_iso` 17/17, `_classify_archetype` 12/12,
+`_classify_provenance` 7/7, `_fuzzy_match_supplier` 10/10,
+`_name_matches_page` 8/8.
+
+**What's still soft:**
+  - 64 rows at `URL_Archetype=unknown` — long tail of one-off legit domains
+    (dudadiesel, marinehydrocolloids, solvo-chem, etc.). Not worth per-host
+    mapping; they correctly fall through to `Provenance_Confidence ∈
+    {directory_listing, model_inferred}` which reflects the weaker evidence.
+  - `vendor_verified` requires the opt-in `homepage_verify` pass (network).
+    The existing 5 `vertexaisearch.cloud.google.com` rows are now blocklisted
+    so fresh enrichments won't re-introduce them; the stale rows remain
+    until the next `supplier_web_enrich` run overwrites or the URL_Blocklist
+    gate is applied retroactively.
+  - DUNS / LEI resolution is stubbed. The `Supplier_Master` queue is real
+    and idempotent, but no external API is called until keys are wired in.
