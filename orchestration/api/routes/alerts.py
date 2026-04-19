@@ -11,7 +11,6 @@ _DB = Path(__file__).parent.parent.parent.parent / "db_enriched.sqlite"
 def _get_db_ro():
     conn = sqlite3.connect(f"file:{_DB}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
 

@@ -44,12 +44,12 @@ async def run(ctx: AgnesContext) -> dict:
 
     narrative = await run_adk_agent(_AGENT, payload, ctx.run_id)
 
-    compliance = ctx.get("gate-compliance", {})
     bom = ctx.get("bom-impact", {})
+    alts = ctx.get("find-alternatives", {}).get("alternatives", [])
     return {
         "summary": narrative,
         "narrative": narrative,
         "ingredient_name": ctx.trigger_payload.get("ingredient_name"),
-        "qualified_supplier_count": len(ctx.get("find-alternatives", {}).get("alternatives", [])),
+        "qualified_supplier_count": len(alts) if isinstance(alts, list) else 0,
         "affected_product_count": bom.get("product_count", 0),
     }

@@ -65,7 +65,7 @@ export const agnesApi = {
   apiUrl: API_URL,
 
   async health(): Promise<{ status: string }> {
-    const res = await fetch(`${API_URL}/health`, { method: "GET" });
+    const res = await fetch(`${API_URL}/api/health`, { method: "GET" });
     if (!res.ok) throw new Error("offline");
     return res.json();
   },
