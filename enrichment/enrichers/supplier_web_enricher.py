@@ -31,6 +31,83 @@ _GRADE_KEYS = ("grade", "purity", "spec", "specification")
 _EVIDENCE_KEYS = ("evidence_snippet", "evidence", "snippet", "quote",
                   "source_snippet", "notes")
 
+# Known hostname → URL archetype.
+# Archetypes are used to:
+#   (a) segment pricing (lab-reagent prices are $/g; bulk distributor prices
+#       are $/kg — comparing them directly is bogus, see outlier QC)
+#   (b) set Provenance_Confidence correctly (manufacturer_direct is the
+#       strongest signal, directory listings are weaker)
+# Anything not in this table defaults to 'unknown' — we prefer unknown over
+# mislabeling. Host-matching is done via parent-domain walk.
+_ARCHETYPE_HOSTS: dict[str, str] = {
+    # Directory listings / B2B marketplaces — quotes from various suppliers
+    "indiamart.com":       "directory_listing",
+    "made-in-china.com":   "directory_listing",
+    "alibaba.com":         "directory_listing",
+    "echemi.com":          "directory_listing",
+    "tradewheel.com":      "directory_listing",
+    "globalsources.com":   "directory_listing",
+    "thomasnet.com":       "directory_listing",
+    "chemicalbook.com":    "directory_listing",
+    "chemicalregister.com":"directory_listing",
+    "go4worldbusiness.com":"directory_listing",
+    "tradeindia.com":      "directory_listing",
+    "exportersindia.com":  "directory_listing",
+    "globaltradeplaza.com":"directory_listing",
+    "ec21.com":            "directory_listing",
+    "ecplaza.net":         "directory_listing",
+    # Bulk ingredient distributors / resellers
+    "bulksupplements.com": "distributor",
+    "purebulk.com":        "distributor",
+    "laballey.com":        "distributor",
+    "bulkapothecary.com":  "distributor",
+    "ingredi.com":         "distributor",
+    "spectrumchemical.com":"distributor",
+    "chemistrywarehouse.com":"distributor",
+    "boxnutra.com":        "distributor",
+    "bulkfoods.com":       "distributor",
+    "ingredientsonline.com":"distributor",
+    "ingredientdepot.ca":  "distributor",
+    "ingredientdepot.com": "distributor",
+    "labdepotinc.com":     "distributor",
+    "univarsolutions.com": "distributor",
+    "brenntag.com":        "distributor",
+    "azelis.com":          "distributor",
+    "barentz.com":          "distributor",
+    "nutraceuticalsgroup.com":"distributor",
+    # Lab / research reagent houses — small quantities, research grade
+    "sigmaaldrich.com":    "lab_reagent",
+    "fishersci.com":       "lab_reagent",
+    "thermofisher.com":    "lab_reagent",
+    "vwr.com":             "lab_reagent",
+    "tcichemicals.com":    "lab_reagent",
+    "oakwoodchemical.com": "lab_reagent",
+    "chemexper.com":       "lab_reagent",
+    "emdmillipore.com":    "lab_reagent",
+    "merckmillipore.com":  "lab_reagent",
+    "caymanchem.com":      "lab_reagent",
+    # Manufacturer-direct — mid-sized and specialty producers that show up
+    # repeatedly in our BOM ingredient set. These are *single-entity* domains
+    # (one company, one product line), not aggregators. When this tier matches
+    # provenance lifts to 'website_explicit'.
+    "jungbunzlauer.com":   "manufacturer_direct",   # citric acid / excipients
+    "chem-impex.com":      "manufacturer_direct",
+    "chemimpex.com":       "manufacturer_direct",
+    "rpicorp.com":         "manufacturer_direct",   # Research Products Intl
+    "sinofi.com":          "manufacturer_direct",   # Chinese mfr, mostly APIs
+    "vivioninc.com":       "manufacturer_direct",
+    "dsm.com":             "manufacturer_direct",
+    "basf.com":            "manufacturer_direct",
+    "cargill.com":         "manufacturer_direct",
+    "adm.com":             "manufacturer_direct",
+    "roquette.com":        "manufacturer_direct",
+    "ingredion.com":       "manufacturer_direct",
+    "kerry.com":            "manufacturer_direct",
+    "lonza.com":           "manufacturer_direct",
+    "evonik.com":          "manufacturer_direct",
+}
+
+
 # Currency conversion to USD. Update annually; sandbox-grade approximations.
 _FX_TO_USD = {
     "USD": 1.0, "$": 1.0,
@@ -205,32 +282,130 @@ def _hostname_blocked(url: str | None, blocklist: set[str]) -> bool:
     return False
 
 
-def _classify_provenance(url: str | None, country_ok: bool, evidence: str | None) -> str:
-    """First-cut Provenance_Confidence. The archetype classifier in the next
-    commit refines 'directory_listing' vs 'website_explicit' based on the host.
+def _classify_archetype(url: str | None) -> str:
+    """Return one of: directory_listing, distributor, lab_reagent,
+    manufacturer_direct, unknown.
 
-    - url + country + evidence  → directory_listing (upgradeable)
-    - url + country only         → directory_listing
-    - url only, no country       → model_inferred
-    - country only, no url       → model_inferred
-    - neither                    → unknown
+    Parent-domain walk: news.made-in-china.com also matches made-in-china.com.
+    Unknown hosts default to 'unknown' (not 'manufacturer_direct') — we prefer
+    explicit unknowns over optimistic guesses.
     """
-    if url and country_ok:
-        return "directory_listing"
-    if url or country_ok:
-        return "model_inferred"
+    host = _hostname(url)
+    if not host:
+        return "unknown"
+    # Exact + strip www.
+    candidates = [host]
+    if host.startswith("www."):
+        candidates.append(host[4:])
+    # Parent-domain walk
+    parts = (host[4:] if host.startswith("www.") else host).split(".")
+    for i in range(1, len(parts) - 1):
+        candidates.append(".".join(parts[i:]))
+    for c in candidates:
+        if c in _ARCHETYPE_HOSTS:
+            return _ARCHETYPE_HOSTS[c]
     return "unknown"
+
+
+def _classify_provenance(
+    url: str | None, country_ok: bool, evidence: str | None, archetype: str = "unknown"
+) -> str:
+    """Provenance_Confidence tiers — how much trust to place in the row's claims.
+
+    Decision tree (first match wins):
+      - no url, no country                 → unknown
+      - no url, country only               → model_inferred
+      - url + archetype=directory_listing  → directory_listing
+      - url + archetype=distributor        → directory_listing (trustworthy but indirect)
+      - url + archetype=lab_reagent        → directory_listing (niche market tier)
+      - url + archetype=manufacturer_direct→ website_explicit
+      - url + archetype=unknown + country  → directory_listing
+      - url + archetype=unknown, no country→ model_inferred
+
+    'vendor_verified' is only set by Supplier_Master joins (trade-register
+    match). 'website_explicit' requires a known manufacturer-direct host,
+    which this function can flag but can't confirm — that's what the
+    two-pass verification job is for.
+    """
+    if not url and not country_ok:
+        return "unknown"
+    if not url:
+        return "model_inferred"
+    # url is present
+    if archetype == "manufacturer_direct":
+        return "website_explicit"
+    if archetype in ("directory_listing", "distributor", "lab_reagent"):
+        return "directory_listing"
+    # archetype == 'unknown'
+    return "directory_listing" if country_ok else "model_inferred"
+
+
+# Corporate suffixes to strip before fuzzy-matching. Keep this short —
+# over-aggressive stripping creates false positives ("Pure Labs LLC" vs
+# "Impure Labs LLC" shouldn't collapse).
+_CORP_SUFFIX_RE = re.compile(
+    r"\b(?:inc|incorporated|ltd|limited|llc|llp|co|company|corp|corporation|"
+    r"gmbh|ag|sa|srl|spa|pvt|pty|bv|nv|plc|kg|kk)\b\.?",
+    re.IGNORECASE,
+)
+
+
+def _normalize_supplier_name(name: str) -> str:
+    """Lowercase, strip punctuation + corporate suffixes, collapse whitespace."""
+    s = name.lower()
+    s = _CORP_SUFFIX_RE.sub("", s)
+    s = re.sub(r"[^\w\s]", " ", s)   # punctuation → space
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
+def _fuzzy_match_supplier(
+    name: str, existing: list[tuple[int, str]], threshold: int = 90
+) -> tuple[int, str, int] | None:
+    """Return (id, matched_name, score) of best fuzzy match above threshold, or None.
+
+    Both input and candidates are normalised (lowercase, strip corporate
+    suffixes + punctuation, collapse whitespace) before scoring. Uses
+    rapidfuzz.token_set_ratio which is order-insensitive.
+    """
+    if not existing:
+        return None
+    from rapidfuzz import process, fuzz
+    norm_name = _normalize_supplier_name(name)
+    if not norm_name:
+        return None
+    norm_existing = [(eid, ename, _normalize_supplier_name(ename)) for eid, ename in existing]
+    norm_list = [t[2] for t in norm_existing]
+    match = process.extractOne(
+        norm_name, norm_list, scorer=fuzz.token_set_ratio, score_cutoff=threshold
+    )
+    if not match:
+        return None
+    _matched, score, idx = match
+    eid, ename, _ = norm_existing[idx]
+    return eid, ename, int(score)
 
 
 class SupplierWebEnricher:
     def __init__(self, db_path: str | Path = ENRICHED_DB):
         self.db_path = str(db_path)
         self._blocklist_cache: set[str] | None = None
+        self._supplier_cache: list[tuple[int, str]] | None = None
+        # Fuzzy-match threshold. 90 handles "ACME, Inc." vs "ACME Inc" cleanly
+        # without collapsing genuinely different names like "Pure Bulk" vs
+        # "Purely Nutrition".
+        self._fuzzy_threshold = 90
 
     def _get_blocklist(self, conn: sqlite3.Connection) -> set[str]:
         if self._blocklist_cache is None:
             self._blocklist_cache = _load_blocklist(conn)
         return self._blocklist_cache
+
+    def _get_supplier_cache(self, conn: sqlite3.Connection) -> list[tuple[int, str]]:
+        if self._supplier_cache is None:
+            rows = conn.execute("SELECT Id, Name FROM Supplier").fetchall()
+            self._supplier_cache = [(r[0], r[1]) for r in rows]
+        return self._supplier_cache
 
     def _get_targets(self) -> list[tuple[int, str, str | None]]:
         """Return (canonical_id, name, grade_flag) for canonicals with no web-search commercial rows."""
@@ -250,12 +425,35 @@ class SupplierWebEnricher:
         return [(r[0], r[1], r[2]) for r in rows]
 
     def _upsert_supplier(self, conn: sqlite3.Connection, supplier_name: str, country: str | None) -> int:
-        existing = conn.execute("SELECT Id FROM Supplier WHERE Name = ?", (supplier_name,)).fetchone()
-        if existing:
-            return existing[0]
-        # Supplier table is (Id, Name) — country goes onto Supplier_Commercial.Country_Origin
+        """Exact-match first, then fuzzy-match (token_set_ratio >= 90), then insert.
+
+        Fuzzy-match catches the "Made-in-China.com (various suppliers)" class
+        of dup where the same entity shows up under slightly different names
+        across runs. When a fuzzy match hits, we reuse the existing SupplierId
+        and log the collision so the pattern is visible.
+        """
+        cache = self._get_supplier_cache(conn)
+        # Exact match in cache first (case-sensitive, which matches the old
+        # behaviour — suppliers often have capitalisation differences that we
+        # *do* want to treat as the same entity; those fall through to fuzzy).
+        for sid, sname in cache:
+            if sname == supplier_name:
+                return sid
+        # Fuzzy match against existing suppliers.
+        match = _fuzzy_match_supplier(supplier_name, cache, threshold=self._fuzzy_threshold)
+        if match:
+            sid, matched_name, score = match
+            logger.info(
+                f"  fuzzy-matched {supplier_name!r} to existing {matched_name!r} "
+                f"(id={sid}, score={score})"
+            )
+            return sid
+        # Insert new supplier + update cache.
         cur = conn.execute("INSERT OR IGNORE INTO Supplier (Name) VALUES (?)", (supplier_name,))
-        sid = cur.lastrowid or conn.execute("SELECT Id FROM Supplier WHERE Name = ?", (supplier_name,)).fetchone()[0]
+        sid = cur.lastrowid or conn.execute(
+            "SELECT Id FROM Supplier WHERE Name = ?", (supplier_name,)
+        ).fetchone()[0]
+        cache.append((sid, supplier_name))
         return sid
 
     def _existing_prices_for_ingredient(self, conn: sqlite3.Connection, canonical_id: int) -> list[float]:
@@ -321,18 +519,19 @@ class SupplierWebEnricher:
                 )
                 return False
 
-        # --- Provenance gate 3: classify confidence on write.
-        provenance = _classify_provenance(url, country is not None, evidence)
+        # --- Provenance gate 3: classify archetype + confidence on write.
+        archetype = _classify_archetype(url)
+        provenance = _classify_provenance(url, country is not None, evidence, archetype)
 
         conn.execute(
             """INSERT OR REPLACE INTO Supplier_Commercial
                (SupplierId, CanonicalIngredientId, Price_USD_Per_KG, MOQ_KG,
                 Country_Origin, Price_Type, Price_Source, Confidence,
                 Source_URL, Last_Updated, Grade_Unverified, Purity_Qualifier,
-                Provenance_Confidence, Evidence_Snippet)
-               VALUES (?, ?, ?, ?, ?, 'web_search', 'google_search', ?, ?, datetime('now'), 1, ?, ?, ?)""",
+                Provenance_Confidence, Evidence_Snippet, URL_Archetype)
+               VALUES (?, ?, ?, ?, ?, 'web_search', 'google_search', ?, ?, datetime('now'), 1, ?, ?, ?, ?)""",
             (supplier_id, canonical_id, price, moq, country, _CONFIDENCE_WEB, url,
-             purity_qualifier, provenance, evidence)
+             purity_qualifier, provenance, evidence, archetype)
         )
         return True
 

@@ -129,6 +129,10 @@ def migrate(conn: sqlite3.Connection) -> dict:
         ("x.com",               "social"),
         ("youtube.com",         "media"),
         ("medium.com",          "blog"),
+        # Grounding-API redirects: vertexaisearch emits short-lived redirect
+        # URLs through its own domain. They aren't the real source and expire
+        # quickly; a row whose Source_URL is vertex is effectively unverifiable.
+        ("vertexaisearch.cloud.google.com", "grounding_redirect"),
     ]
     for host, reason in _seed_blocklist:
         cur = conn.execute(
