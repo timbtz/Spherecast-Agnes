@@ -268,8 +268,11 @@ export const mockData = {
     return {
       run_id: this.newRunId(pipeline),
       pipeline,
-      status: "running",
+      params: {},
       confidence: 0.78 + Math.random() * 0.18,
+      reasoning: "Matched pipeline from keywords in message.",
+      status: "started",
+      secondary_runs: [],
     };
   },
 

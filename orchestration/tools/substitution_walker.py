@@ -1,10 +1,11 @@
 """
 Deterministic tool: walk Ingredient_Substitution graph for a given canonical ingredient.
-Returns scored substitution candidates (identical > equivalent > partial).
+Uses _ingredient_resolver for 3-stage name resolution.
 """
 import sqlite3
 
 from orchestration.api.agnes_context import AgnesContext
+from orchestration.tools._ingredient_resolver import resolve
 
 _MIN_SCORE = 0.5
 
@@ -13,19 +14,19 @@ def run(ctx: AgnesContext) -> dict:
     payload = ctx.trigger_payload
     ingredient_name: str = payload.get("ingredient_name", "")
 
+    resolution = resolve(ingredient_name, db_path=ctx.enriched_db_path)
+
+    if resolution["resolution_failed"]:
+        return {
+            "substitutes": [],
+            "ingredient_name": ingredient_name,
+            "error": f"ingredient not found ({resolution.get('reason', 'no_match')})",
+            "resolution": resolution,
+        }
+
+    canonical_id = resolution["canonical_id"]
     conn = sqlite3.connect(str(ctx.enriched_db_path))
     conn.row_factory = sqlite3.Row
-
-    row = conn.execute(
-        "SELECT Id FROM Ingredient_Canonical WHERE LOWER(Name) = LOWER(?) LIMIT 1",
-        (ingredient_name,),
-    ).fetchone()
-
-    if not row:
-        conn.close()
-        return {"substitutes": [], "ingredient_name": ingredient_name}
-
-    canonical_id = row["Id"]
 
     rows = conn.execute(
         """
@@ -56,5 +57,7 @@ def run(ctx: AgnesContext) -> dict:
         "substitutes": [dict(r) for r in rows],
         "ingredient_name": ingredient_name,
         "canonical_id": canonical_id,
+        "canonical_name": resolution["canonical_name"],
         "count": len(rows),
+        "resolution": resolution,
     }

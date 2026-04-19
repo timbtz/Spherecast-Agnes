@@ -114,11 +114,20 @@ export interface RunDetail extends PipelineRun {
   events: RunEvent[];
 }
 
-export interface ChatResponse {
+export interface SecondaryRun {
   run_id: string;
-  pipeline: PipelineName | string;
-  status: RunStatus;
-  confidence?: number;
+  pipeline: string;
+  params: Record<string, unknown>;
+}
+
+export interface ChatResponse {
+  run_id: string | null;
+  pipeline: PipelineName | string | null;
+  params: Record<string, unknown>;
+  confidence: number;
+  reasoning: string;
+  status: "started" | "no_match";
+  secondary_runs: SecondaryRun[];
 }
 
 export interface ScoringWeights {

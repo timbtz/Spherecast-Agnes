@@ -28,11 +28,15 @@
 | `orchestration/api/main.py` | ✅ Live | FastAPI; start: `PYTHONPATH=. uvicorn orchestration.api.main:app --reload --port 8000` |
 | `orchestration/api/dag_executor.py` | ✅ Complete | Topological layers, asyncio.gather(), `orchestration.db` event log, SSE publish |
 | `orchestration/api/pipeline_loader.py` | ✅ Complete | YAML → Pipeline/PipelineNode dataclasses; 7 pipelines loaded |
-| `orchestration/api/conditions.py` | ✅ Complete | 9 named condition guards incl. `has_stale_prices`, `has_price_alerts` |
-| `orchestration/agents/router_agent.py` | ✅ Complete | Claude-Haiku chat classifier → pipeline name + params JSON |
+| `orchestration/api/conditions.py` | ✅ Complete | 14 condition guards; +3 negative conditions: `no_substitutes_found`, `no_price_data_found`, `no_opportunities_found` |
+| `orchestration/agents/router_agent.py` | ✅ Updated | Gemini compound-intent classifier; `secondary_intents[]` support; prefilter for hostile markers; confidence floor 0.2 |
+| `orchestration/api/routes/chat.py` | ✅ Updated | POST /chat returns `secondary_runs[]`; fans out compound intents to parallel pipeline executions |
 | `orchestration/agents/{reactive,proactive,research,proposal_writer,price_fetch_agent,price_alert_writer}` | ✅ Complete | All Claude/Gemini-based; search_sub_agent wired |
-| `orchestration/tools/` | ✅ Complete | 10 deterministic tools: + regulatory_drift_tool |
-| `orchestration/pipelines/` | ✅ 7 pipelines | + regulatory_drift_alert (data_update trigger) |
+| `orchestration/tools/` | ✅ Complete | 13 deterministic tools: +EntityVerifyTool (GLEIF), +NoDataExplainerTool, +NoOpportunityExplainerTool; +_ingredient_resolver shared utility |
+| `orchestration/tools/_ingredient_resolver.py` | ✅ New | Shared 3-stage resolver: exact→80+ synonyms→RapidFuzz(≥85); used by supplier_alternatives + substitution_walker |
+| `orchestration/tools/entity_verify.py` | ✅ New | GLEIF LEI lookup via free API; caches in Supplier_Master (30d TTL); returns vetted/LEI/legal_name |
+| `orchestration/pipelines/` | ✅ 7 pipelines | supplier_fallout +verify-entity; substitution_discovery +no-data-fallback; proactive_consolidation +no-opportunity-fallback; new_ingredient_research +verify-entity |
+| `enrichment/db_migrate_supplier_master.py` | ✅ New + run | Creates Supplier_Master table for GLEIF cache; idempotent |
 | **Endpoints** | ✅ 17 endpoints | + GET /api/data/regulatory-alerts |
 
 ---
@@ -63,8 +67,16 @@
 | `enrichment/backfill_iid_changelog.py` | ✅ Complete + run | Top-level runner: migrate + CSV load; idempotent |
 | `orchestration/tools/regulatory_drift_tool.py` | ✅ Complete | Pairs C rows, assigns severity HIGH/MEDIUM/LOW, cross-refs Consolidation_Opportunity |
 | `orchestration/agents/reactive_agent.py` | ✅ Fixed | Bug fixed: was reading `gate-qualify` (wrong key), now reads `gate-compliance`; also consumes `web-research` output |
-| `orchestration/pipelines/supplier_fallout.yaml` | ✅ Updated | Added `web-research` (ResearchAgent) node gated by `needs_supplier_research`; `write-proposal` now depends on it |
-| `orchestration/api/conditions.py` | ✅ Updated | Added `needs_supplier_research`: fires when DB alternatives < 3 or all have no Lead_Time_Days |
+| `orchestration/pipelines/supplier_fallout.yaml` | ✅ Updated | Added `verify-entity` (EntityVerifyTool) node; `write-proposal` now depends on verify-entity too |
+| `orchestration/api/conditions.py` | ✅ Updated | +3 conditions: `no_substitutes_found`, `no_price_data_found`, `no_opportunities_found`; 14 total |
+| `orchestration/tools/no_data_explainer.py` | ✅ New | Fallback tool: explains empty find-substitutes/find-alternatives via _ingredient_resolver |
+| `orchestration/tools/no_opportunity_explainer.py` | ✅ New | Fallback tool: explains zero consolidation opportunities with catalog stats |
+| `orchestration/tools/supplier_alternatives.py` | ✅ Updated | Uses _ingredient_resolver (3-stage resolution); LEFT JOIN Supplier_Master for GLEIF vetting cols |
+| `orchestration/tools/substitution_walker.py` | ✅ Updated | Uses _ingredient_resolver; returns canonical_name + resolution in output |
+| `orchestration/pipelines/substitution_discovery.yaml` | ✅ Updated | Added `no-data-fallback` node (NoDataExplainerTool) gated by `no_substitutes_found` |
+| `orchestration/pipelines/proactive_consolidation.yaml` | ✅ Updated | Added `no-opportunity-fallback` node (NoOpportunityExplainerTool) gated by `no_opportunities_found` |
+| `orchestration/pipelines/new_ingredient_research.yaml` | ✅ Updated | Added `verify-entity` (EntityVerifyTool) node gated by `has_research_results` |
+| `orchestration/api/agent_registry.py` | ✅ Updated | +3 tools: EntityVerifyTool, NoDataExplainerTool, NoOpportunityExplainerTool; 13 total |
 | `orchestration/agents/regulatory_research_agent.py` | ✅ Complete | Searches FDA quarterly change log; downloads CSV if found; graceful fallback on failure |
 | `orchestration/agents/regulatory_drift_agent.py` | ✅ Complete | Gemini narrative for drift alerts; writes regulatory_drift_flag to DB |
 | `orchestration/pipelines/regulatory_drift_alert.yaml` | ✅ Complete | 4-node: fetch-latest-changes → scan-drift → find-alternatives → write-alerts |
@@ -91,6 +103,10 @@
 | `orchestration/ui/src/types/agnes.ts` | ✅ Extended | Added ProvenanceConfidence, UrlHealth, Lane types; ScoredSupplier extended with provenance_confidence, corroboration_score, url_health, vetted, url_archetype |
 | `orchestration/ui/src/components/orb/VoiceOrb.tsx` | ✅ Fixed | OrbErrorBoundary wraps Canvas; WebGL failure renders CSS gradient fallback instead of crashing app |
 | `orchestration/ui/src/hooks/usePriceAlerts.ts` | ✅ New | `usePriceAlertCount()` — polls /api/alerts/count every 60s |
+| `orchestration/ui/src/types/agnes.ts` | ✅ Updated | `ChatResponse` now typed correctly: `secondary_runs[]`, `reasoning`, `params`, `status: "started"\|"no_match"` |
+| `orchestration/ui/src/store/agnesStore.ts` | ✅ Updated | `secondaryRunIds[]` + `addSecondaryRun()` — tracks compound intent fan-out in store |
+| `orchestration/ui/src/hooks/useAgnes.ts` | ✅ Updated | Handles `secondary_runs[]`: subscribes to each secondary SSE stream; `no_match` status handled with voice fallback |
+| `orchestration/ui/src/components/dag/DagGraphView.tsx` | ✅ Updated | `ActiveRunInline` shows `+N more` pill when compound intent secondary runs are active |
 | `enrichment/sources/rxnorm.py` | ❌ Missing | Low priority — narrow use (drug-class ingredients only) |
 | `enrichment/sources/fdc.py` | ❌ Missing | Low priority — only useful for ~5 food-macro SKUs |
 | `reasoning/consolidation_scorer.py` | ✅ Fixed + run | Formula: company×0.40 + bom×0.25 + fragmentation×0.20 + supplier_spread×0.15; 129 rows scored |
@@ -123,6 +139,12 @@ All v1.1 fields are live in `db_enriched.sqlite`. `enrichment/db_migrate_v11.py`
 ---
 
 ## Arcs — Problems, Findings, Limitations
+
+**[NEW]** GLEIF entity verification added via `entity_verify.py` (EntityVerifyTool). Free LEI API, no key needed. Supplier_Master table caches results 30 days. Wired into supplier_fallout + new_ingredient_research pipelines. Fuzzy name normalization strips LLC/Inc/Ltd suffixes before lookup.
+
+**[NEW]** `_ingredient_resolver.py` shared utility: 3-stage resolution (exact → 80+ curated synonyms → RapidFuzz token_set_ratio ≥85). Adopted by supplier_alternatives + substitution_walker. "vitamin d3" and "MCC" now resolve correctly instead of failing silently.
+
+**[NEW]** Router agent upgraded: compound intent support ("X failed AND audit Y" → primary + secondary_intents[]); hostile marker prefilter; confidence floor 0.2; `/chat` endpoint fans out secondary runs. Backward-compatible — single-intent messages unaffected.
 
 **[FIXED]** Vitamin C (33 co.) merged from Vitamin C (25 co.) + l-ascorbic acid (17 co.) via PubChem synonym UNII backfill. `get_unii_from_synonyms()` added to PubChemClient; 88/90 CID-bearing canonicals populated. dedup_by_unii() got CAS-differs guard to block false positives (elemental Zn/Mg/Cr UNIIs shared with chelated forms).
 
@@ -198,3 +220,4 @@ SELECT COUNT(*) FROM Consolidation_Opportunity WHERE Proposal_Text IS NOT NULL;
 | Anthropic | `.env` `ANTHROPIC_API_KEY` | Phase 4 proposals (top-50 LLM pass) | Per-token |
 | USDA FDC | `.env` `FDC_API_KEY` | Phase 1 tier-4 fallback (5 food macros only) | 1000/hr |
 | RxNorm | No key | Phase 1 tier-3 fallback (drug-class only) | Undocumented |
+| GLEIF LEI API | No key | entity_verify.py supplier KYC; 30-day cache in Supplier_Master | Free, undocumented |

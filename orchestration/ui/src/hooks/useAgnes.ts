@@ -7,7 +7,7 @@ import {
   startMicLevelMonitor,
   startSpeech,
 } from "@/lib/speech";
-import type { RunEvent } from "@/types/agnes";
+import type { RunEvent, SecondaryRun } from "@/types/agnes";
 
 // useAgnes — orchestrates: Web Speech (STT) → /chat → SSE stream → ElevenLabs TTS
 export function useAgnes() {
@@ -18,6 +18,7 @@ export function useAgnes() {
     setTranscript,
     setLastResponse,
     startRun,
+    addSecondaryRun,
     applyEvent,
     setGraph,
     activeRunId,
@@ -65,16 +66,42 @@ export function useAgnes() {
     [setLastResponse, setOrbState, setOutputLevel],
   );
 
+  const subscribeSecondary = useCallback(
+    (runs: SecondaryRun[]) => {
+      for (const sec of runs) {
+        addSecondaryRun(sec.run_id);
+        const close = agnesApi.streamRun(
+          sec.run_id,
+          () => { /* secondary events not shown in primary DAG */ },
+          () => { /* stream closed */ },
+        );
+        cleanupRef.current.push(close);
+      }
+    },
+    [addSecondaryRun],
+  );
+
   const handleTranscript = useCallback(
     async (text: string) => {
       setTranscript(text);
       setOrbState("thinking");
       try {
         const resp = await agnesApi.chat(text);
+
+        if (resp.status === "no_match" || !resp.run_id || !resp.pipeline) {
+          void speak("I wasn't sure which workflow to run. Could you rephrase your request?");
+          return;
+        }
+
         let graph = null;
         try { graph = await agnesApi.pipelineGraph(resp.pipeline); } catch { /* noop */ }
         startRun(resp.run_id, resp.pipeline, graph);
         eventsRef.current = [];
+
+        // Fan out secondary pipelines (compound intents) — subscribe but don't display their DAGs.
+        if (resp.secondary_runs?.length) {
+          subscribeSecondary(resp.secondary_runs);
+        }
 
         const closeStream = agnesApi.streamRun(
           resp.run_id,
@@ -96,7 +123,7 @@ export function useAgnes() {
         window.setTimeout(() => setOrbState("idle"), 1500);
       }
     },
-    [applyEvent, setOrbState, setTranscript, speak, startRun],
+    [applyEvent, setOrbState, setTranscript, speak, startRun, subscribeSecondary],
   );
 
   const startListening = useCallback(async () => {

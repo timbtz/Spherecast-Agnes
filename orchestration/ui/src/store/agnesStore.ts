@@ -30,7 +30,9 @@ interface AgnesStore {
   activeGraph: DagGraph | null;
   nodeStates: Record<string, NodeRuntimeState>;
   runEvents: RunEvent[];
+  secondaryRunIds: string[];
   startRun: (runId: string, pipeline: string, graph: DagGraph | null) => void;
+  addSecondaryRun: (runId: string) => void;
   applyEvent: (e: RunEvent) => void;
   clearRun: () => void;
   setGraph: (g: DagGraph) => void;
@@ -57,6 +59,7 @@ export const useAgnesStore = create<AgnesStore>((set, get) => ({
   activeGraph: null,
   nodeStates: {},
   runEvents: [],
+  secondaryRunIds: [],
 
   startRun: (runId, pipeline, graph) => {
     const nodeStates: Record<string, NodeRuntimeState> = {};
@@ -71,8 +74,12 @@ export const useAgnesStore = create<AgnesStore>((set, get) => ({
       activeGraph: graph,
       nodeStates,
       runEvents: [],
+      secondaryRunIds: [],
     });
   },
+
+  addSecondaryRun: (runId) =>
+    set((s) => ({ secondaryRunIds: [...s.secondaryRunIds, runId] })),
 
   setGraph: (g) => {
     const cur = get().nodeStates;
@@ -115,6 +122,7 @@ export const useAgnesStore = create<AgnesStore>((set, get) => ({
       activeGraph: null,
       nodeStates: {},
       runEvents: [],
+      secondaryRunIds: [],
     }),
 
   apiOnline: false,

@@ -457,6 +457,7 @@ export function ActiveRunInline() {
   const activePipeline = useAgnesStore((s) => s.activePipeline);
   const activeGraph = useAgnesStore((s) => s.activeGraph);
   const nodeStates = useAgnesStore((s) => s.nodeStates);
+  const secondaryRunIds = useAgnesStore((s) => s.secondaryRunIds);
   if (!activeRunId || !activeGraph) return null;
   const total = activeGraph.nodes.length;
   const done = Object.values(nodeStates).filter((n) => n.status === "completed").length;
@@ -465,7 +466,14 @@ export function ActiveRunInline() {
     <div className="rounded-lg border border-border bg-surface-subtle px-3 py-2 flex items-center gap-3 text-[12px]">
       <Loader2 className={cn("size-3.5 text-status-running", running > 0 && "animate-spin")} />
       <div className="flex flex-col">
-        <span className="font-medium text-foreground">{activePipeline}</span>
+        <div className="flex items-center gap-1.5">
+          <span className="font-medium text-foreground">{activePipeline}</span>
+          {secondaryRunIds.length > 0 && (
+            <span className="pill bg-orb-thinking/10 text-orb-thinking border border-orb-thinking/20 text-[10px]">
+              +{secondaryRunIds.length} more
+            </span>
+          )}
+        </div>
         <span className="text-[11px] text-muted-foreground font-mono truncate max-w-[180px]">{activeRunId}</span>
       </div>
       <span className="ml-auto text-muted-foreground tabular-nums">{done}/{total}</span>

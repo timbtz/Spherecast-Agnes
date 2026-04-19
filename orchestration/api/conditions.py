@@ -67,6 +67,24 @@ def needs_supplier_research(ctx: AgnesContext) -> bool:
     return all(a.get("Lead_Time_Days") is None for a in alts)
 
 
+def no_substitutes_found(ctx: AgnesContext) -> bool:
+    """True when find-substitutes ran but returned an empty substitutes list."""
+    out = ctx.get("find-substitutes", {})
+    return "substitutes" in out and not out["substitutes"]
+
+
+def no_price_data_found(ctx: AgnesContext) -> bool:
+    """True when benchmark-prices ran but returned no price data at all."""
+    out = ctx.get("benchmark-prices", {})
+    return "stats" in out and not out.get("annotated_prices") and not out.get("outliers")
+
+
+def no_opportunities_found(ctx: AgnesContext) -> bool:
+    """True when scan-opportunities ran but returned zero opportunities."""
+    out = ctx.get("scan-opportunities", {})
+    return "opportunities" in out and len(out["opportunities"]) == 0
+
+
 _REGISTRY: dict[str, ConditionFn] = {
     "has_alternatives": has_alternatives,
     "above_score_threshold": above_score_threshold,
@@ -79,6 +97,9 @@ _REGISTRY: dict[str, ConditionFn] = {
     "has_price_alerts": has_price_alerts,
     "has_regulatory_drift": has_regulatory_drift,
     "needs_supplier_research": needs_supplier_research,
+    "no_substitutes_found": no_substitutes_found,
+    "no_price_data_found": no_price_data_found,
+    "no_opportunities_found": no_opportunities_found,
 }
 
 

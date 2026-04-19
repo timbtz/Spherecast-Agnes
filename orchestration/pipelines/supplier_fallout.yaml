@@ -1,7 +1,7 @@
 name: supplier_fallout
 trigger: chat
-# US-01: A supplier can no longer deliver. Find ranked alternatives, gate on compliance,
-# assess BOM impact, draft RFQs, and produce a reactive narrative.
+# US-01: A supplier can no longer deliver. Find ranked alternatives, verify legal entities,
+# gate on compliance, assess BOM impact, draft RFQs, and produce a reactive narrative.
 # If DB alternatives are sparse or lack lead-time data, a ResearchAgent sub-agent
 # runs fresh web research to augment before the narrative is written.
 nodes:
@@ -13,6 +13,11 @@ nodes:
     agent_class: ResearchAgent
     depends_on: [find-alternatives]
     when: needs_supplier_research
+
+  - id: verify-entity
+    tool_class: EntityVerifyTool
+    depends_on: [find-alternatives]
+    when: has_alternatives
 
   - id: gate-compliance
     tool_class: ComplianceReasonerTool
@@ -30,4 +35,4 @@ nodes:
 
   - id: write-proposal
     agent_class: ReactiveAgent
-    depends_on: [format-rfqs, bom-impact, web-research]
+    depends_on: [format-rfqs, bom-impact, web-research, verify-entity]

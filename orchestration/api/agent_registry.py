@@ -23,6 +23,9 @@ _TOOL_REGISTRY: dict[str, str] = {
     "ComplianceReasonerTool":     "orchestration.tools.compliance_reasoner_tool:run",
     "PriceStalenesCheckerTool":   "orchestration.tools.price_staleness_checker:run",
     "RegulatoryDriftTool":        "orchestration.tools.regulatory_drift_tool:run",
+    "EntityVerifyTool":           "orchestration.tools.entity_verify:run",
+    "NoDataExplainerTool":        "orchestration.tools.no_data_explainer:run",
+    "NoOpportunityExplainerTool": "orchestration.tools.no_opportunity_explainer:run",
 }
 
 
