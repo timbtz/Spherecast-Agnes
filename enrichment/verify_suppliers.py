@@ -110,16 +110,34 @@ def _name_matches_page(supplier_name: str, body: str) -> bool:
     page saying 'Welcome to PureBulk'. Not fuzzy — exact substring on the
     normalised form. Fuzzy homepage match adds too many false positives when
     the body is > 100KB of navigation boilerplate.
+
+    Normalises the page body the same way supplier names are normalised:
+    HTML stripped, punctuation collapsed to spaces, lowercase, whitespace
+    collapsed. Without this, 'BulkSupplements.com' (normalised to
+    'bulksupplements com') would fail to match a page title containing
+    'bulksupplements.com' because the dot isn't reduced to a space on the
+    body side.
     """
     if not body:
         return False
     norm_supplier = _normalize_supplier_name(supplier_name)
     if not norm_supplier:
         return False
-    # Normalise body the same way
-    norm_body = re.sub(r"<[^>]+>", " ", body)  # strip HTML tags
+    # Normalise body the same way as supplier names: strip HTML tags,
+    # collapse punctuation to spaces, lowercase, collapse whitespace.
+    norm_body = re.sub(r"<[^>]+>", " ", body)       # strip HTML tags
+    norm_body = re.sub(r"[^\w\s]", " ", norm_body)   # punctuation → space
     norm_body = re.sub(r"\s+", " ", norm_body.lower())
-    return norm_supplier in norm_body
+    if norm_supplier in norm_body:
+        return True
+    # Token fallback: all long tokens (>2 chars) present. Handles cases
+    # where corporate suffixes were stripped from the supplier name but
+    # the homepage still has them (or vice versa), and simple word-order
+    # differences. Ignores short tokens like 'co' to avoid false positives.
+    tokens = [t for t in norm_supplier.split() if len(t) > 2]
+    if tokens and all(t in norm_body for t in tokens):
+        return True
+    return False
 
 
 async def _fetch_homepage(client, host: str) -> str:

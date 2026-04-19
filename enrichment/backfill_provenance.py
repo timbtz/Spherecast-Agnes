@@ -70,14 +70,25 @@ def backfill_provenance(conn: sqlite3.Connection) -> int:
     """Re-derive Provenance_Confidence for every google_search row.
 
     Needs URL_Archetype already set (run backfill_archetype first).
+
+    Skips rows that have already been promoted to 'vendor_verified' by
+    verify_suppliers.run_homepage_pass — that signal comes from an
+    independent homepage check, and the URL-pattern classifier used here
+    can't recover it. Without this guard, running backfill after verify
+    would demote vendor_verified back to website_explicit.
     """
     rows = conn.execute(
-        """SELECT rowid, Source_URL, Country_Origin, Evidence_Snippet, URL_Archetype
+        """SELECT rowid, Source_URL, Country_Origin, Evidence_Snippet,
+                  URL_Archetype, Provenance_Confidence
            FROM Supplier_Commercial
            WHERE Price_Source = 'google_search'"""
     ).fetchall()
     updated = 0
-    for rowid, url, country, evidence, archetype in rows:
+    preserved = 0
+    for rowid, url, country, evidence, archetype, current in rows:
+        if current == 'vendor_verified':
+            preserved += 1
+            continue
         provenance = _classify_provenance(
             url, country is not None and country != "", evidence, archetype or "unknown"
         )
@@ -87,7 +98,9 @@ def backfill_provenance(conn: sqlite3.Connection) -> int:
         )
         updated += 1
     conn.commit()
-    logger.info(f"provenance pass: {updated} rows updated")
+    logger.info(
+        f"provenance pass: {updated} rows updated, {preserved} vendor_verified preserved"
+    )
     return updated
 
 
