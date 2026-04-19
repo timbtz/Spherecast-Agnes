@@ -18,12 +18,19 @@ Passes:
     4. url_health       — issue async HEAD requests (2s timeout, pooled) and
                           set URL_Health to ok/stale/unreachable. Disabled
                           unless --check-urls is passed; hits the network.
+    5. grade_verif      — clear Grade_Unverified (→ 0) on rows that have at
+                          least one corroboration signal AND at least one
+                          concrete grade signal (numeric Purity_Pct or a
+                          pharmacopoeial qualifier token). New-write default
+                          remains Grade_Unverified=1; this pass promotes
+                          rows that have since accumulated evidence.
 
 Run modes:
     python -m enrichment.backfill_provenance              # all passes except URL health
     python -m enrichment.backfill_provenance --check-urls # include URL health checks
     python -m enrichment.backfill_provenance --only archetype
     python -m enrichment.backfill_provenance --only corroboration
+    python -m enrichment.backfill_provenance --only grade_verif
 """
 from __future__ import annotations
 
@@ -143,6 +150,86 @@ def backfill_corroboration(conn: sqlite3.Connection) -> int:
     return updated
 
 
+# Pharmacopoeial grade tokens. When any of these appears in Purity_Qualifier
+# we treat it as a concrete grade claim (as distinct from marketing words
+# like "premium", "food grade", "pharma grade"). Matched as whole tokens so
+# "USP" doesn't trigger on "USPS" or similar noise. Keep this list tight —
+# adding squishy tokens re-introduces the "Grade" false-positive problem R1
+# had to eliminate.
+_PHARMACOPOEIA_TOKENS = (
+    "USP", "USP-NF", "NF", "FCC", "EP", "BP", "JP", "PH. EUR", "PH EUR",
+    "PH.EUR", "USP43", "USP44", "FCC7", "FCC8", "FCC9",
+    "ACS", "ACS REAGENT", "ACS-GRADE", "REAGENT GRADE", "ANALYTICAL GRADE",
+)
+
+
+def _has_pharmacopoeial_token(qualifier: str | None) -> bool:
+    """Return True iff qualifier contains a whole-token pharmacopoeial grade.
+
+    Splits on comma/semicolon/space then uppercases and strips punctuation,
+    then checks the resulting set against _PHARMACOPOEIA_TOKENS.
+    """
+    if not qualifier:
+        return False
+    import re as _re
+    raw = [t.strip(" .,;:()") for t in _re.split(r"[,;/]|\s+", qualifier) if t.strip()]
+    tokens = {t.upper() for t in raw}
+    # Also join adjacent pairs to catch two-word tokens like "PH EUR" or
+    # "REAGENT GRADE" when split on whitespace.
+    joined = []
+    for i in range(len(raw) - 1):
+        joined.append(f"{raw[i].upper()} {raw[i+1].upper()}")
+    tokens.update(joined)
+    return any(tok in tokens for tok in _PHARMACOPOEIA_TOKENS)
+
+
+def backfill_grade_verification(conn: sqlite3.Connection) -> int:
+    """Clear Grade_Unverified (→ 0) on rows with enough corroborating evidence.
+
+    Two independent signals are required:
+        (A) Corroboration_Score >= 1 — the supplier or its pricing has been
+            seen across multiple hostnames or refresh dates. A single-source
+            claim remains unverified.
+        (B) A concrete grade signal: numeric Purity_Pct (populated by R1) OR
+            a pharmacopoeial qualifier token (USP, NF, FCC, EP, BP, JP, …).
+
+    Without (A) we're trusting a single snapshot; without (B) there's no
+    claim to verify. Rows that fail either test stay Grade_Unverified=1.
+
+    Idempotent: rows that already satisfy both signals are re-set to 0,
+    rows that don't meet both are re-set to 1. Running this after a grade
+    claim regresses will correctly un-verify the row.
+    """
+    rows = conn.execute(
+        """SELECT rowid, Purity_Pct, Purity_Qualifier, Corroboration_Score
+           FROM Supplier_Commercial
+           WHERE Price_Source = 'google_search'"""
+    ).fetchall()
+    verified = 0
+    reverted = 0
+    for rowid, pct, qualifier, corr in rows:
+        has_corroboration = (corr or 0) >= 1
+        has_grade_signal = pct is not None or _has_pharmacopoeial_token(qualifier)
+        if has_corroboration and has_grade_signal:
+            conn.execute(
+                "UPDATE Supplier_Commercial SET Grade_Unverified = 0 WHERE rowid = ?",
+                (rowid,),
+            )
+            verified += 1
+        else:
+            conn.execute(
+                "UPDATE Supplier_Commercial SET Grade_Unverified = 1 WHERE rowid = ?",
+                (rowid,),
+            )
+            reverted += 1
+    conn.commit()
+    logger.info(
+        f"grade_verification pass: {verified} rows verified (→ 0), "
+        f"{reverted} rows remain unverified (→ 1)"
+    )
+    return verified
+
+
 async def _check_url(client, url: str) -> str:
     """Return 'ok' | 'stale' | 'unreachable' for a single URL."""
     try:
@@ -212,7 +299,12 @@ def main(only: str | None = None, check_urls: bool = False,
     conn.execute("PRAGMA journal_mode=WAL")
     stats: dict[str, int] = {}
 
-    passes = only.split(",") if only else ["archetype", "provenance", "corroboration"]
+    # Default order: archetype → provenance → corroboration → grade_verif.
+    # grade_verif must come AFTER corroboration (it reads Corroboration_Score)
+    # and ideally after any run that touches Purity_Pct or Purity_Qualifier.
+    passes = only.split(",") if only else [
+        "archetype", "provenance", "corroboration", "grade_verif"
+    ]
     if check_urls or (only and "url_health" in passes):
         if "url_health" not in passes:
             passes.append("url_health")
@@ -223,6 +315,8 @@ def main(only: str | None = None, check_urls: bool = False,
         stats["provenance_updated"] = backfill_provenance(conn)
     if "corroboration" in passes:
         stats["corroboration_suppliers"] = backfill_corroboration(conn)
+    if "grade_verif" in passes:
+        stats["grade_verified"] = backfill_grade_verification(conn)
     if "url_health" in passes:
         stats["url_health_checked"] = backfill_url_health(conn, limit=url_limit)
 
@@ -236,7 +330,7 @@ def main(only: str | None = None, check_urls: bool = False,
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
-    p.add_argument("--only", help="comma-separated passes: archetype,provenance,corroboration,url_health")
+    p.add_argument("--only", help="comma-separated passes: archetype,provenance,corroboration,grade_verif,url_health")
     p.add_argument("--check-urls", action="store_true", help="include URL health checks (network)")
     p.add_argument("--url-limit", type=int, default=None, help="cap URL health check at N rows")
     args = p.parse_args()
