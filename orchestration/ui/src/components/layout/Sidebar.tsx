@@ -1,8 +1,8 @@
-import { TrendingUp, FlaskConical, ShieldCheck, ShieldAlert, FileText, Workflow, Mic, Package, Bell } from "lucide-react";
+import { TrendingUp, FlaskConical, ShieldCheck, ShieldAlert, FileText, Workflow, Mic, Package, Bell, Route } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { LucideIcon } from "lucide-react";
 
-export type TabKey = "agnes" | "opportunities" | "ingredients" | "compliance" | "proposals" | "runs" | "suppliers" | "alerts" | "regulatory";
+export type TabKey = "agnes" | "opportunities" | "ingredients" | "compliance" | "proposals" | "runs" | "suppliers" | "alerts" | "regulatory" | "routes";
 
 const ITEMS: Array<{ key: TabKey; label: string; icon: LucideIcon; group?: string }> = [
   { key: "agnes", label: "Talk to Agnes", icon: Mic },
@@ -14,6 +14,7 @@ const ITEMS: Array<{ key: TabKey; label: string; icon: LucideIcon; group?: strin
   { key: "suppliers", label: "Suppliers", icon: Package },
   { key: "alerts", label: "Price Alerts", icon: Bell },
   { key: "regulatory", label: "Regulatory", icon: ShieldAlert },
+  { key: "routes", label: "Trade Routes", icon: Route },
 ];
 
 export function Sidebar({ active, onSelect }: { active: TabKey; onSelect: (k: TabKey) => void }) {

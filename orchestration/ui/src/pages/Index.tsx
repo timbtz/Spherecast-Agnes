@@ -11,6 +11,7 @@ import { PipelineRunsView } from "@/components/views/PipelineRunsView";
 import { SuppliersView } from "@/components/views/SuppliersView";
 import { AlertsView } from "@/components/views/AlertsView";
 import { RegulatoryAlertsView } from "@/components/views/RegulatoryAlertsView";
+import { TradeRoutesView } from "@/components/views/TradeRoutesView";
 import { useApiHealth } from "@/hooks/useApiHealth";
 import { useAgnesStore } from "@/store/agnesStore";
 
@@ -24,6 +25,7 @@ const TAB_TITLES: Record<TabKey, { title: string; subtitle: string }> = {
   suppliers: { title: "Supplier Scoring", subtitle: "Rank suppliers by price, lead time, and quality — adjustable weights." },
   alerts: { title: "Price Alerts", subtitle: "Market price changes detected by Agnes — drops are sourcing opportunities, increases are cost risks." },
   regulatory: { title: "Regulatory Alerts", subtitle: "FDA IID changes affecting portfolio ingredients — proactive compliance risk monitoring." },
+  routes: { title: "Trade Routes", subtitle: "Indicative freight lanes by origin, mode, lead time, and cost — sorted by landed cost index." },
 };
 
 const Index = () => {
@@ -58,44 +60,51 @@ const Index = () => {
             {tab === "alerts" ? <AlertsView />
               : tab === "suppliers" ? <SuppliersView />
               : tab === "agnes" ? (
-              <div className="grid grid-cols-1 lg:grid-cols-[minmax(320px,440px)_1fr] gap-8 items-start">
-                <div className="flex flex-col items-center pt-4">
-                  <OrbHero size={240} />
-                  <div className="mt-6 w-full max-w-sm space-y-2">
-                    <ActiveRunInline />
-                    <div className="rounded-lg border border-dashed border-border p-3 text-[12px] text-muted-foreground space-y-1">
-                      <p className="font-medium text-foreground/80 text-[12px]">Try asking</p>
-                      <p>"Find consolidation opportunities for Vitamin C"</p>
-                      <p>"What's our best Magnesium supplier?"</p>
-                      <p>"Audit prices on Omega-3 ingredients"</p>
-                    </div>
+              <div className="flex flex-col gap-6 max-w-4xl mx-auto">
+                {/* Live DAG — shown at top when a run is active */}
+                {activeRunId && activeGraph && (
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold mb-2">
+                      Live Pipeline Execution
+                    </p>
+                    <DagGraphView graph={activeGraph} />
                   </div>
-                </div>
+                )}
 
-                <div className="min-w-0">
-                  {activeRunId && activeGraph ? (
-                    <div className="space-y-2">
-                      <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">
-                        Live pipeline execution
-                      </p>
-                      <DagGraphView graph={activeGraph} />
-                    </div>
-                  ) : (
-                    <div className="rounded-xl border border-border bg-surface-subtle/40 p-8">
-                      <p className="text-[13px] font-medium text-foreground mb-1">How Agnes thinks</p>
-                      <p className="text-[12.5px] text-muted-foreground leading-relaxed mb-4">
-                        When you speak to Agnes, your transcript is routed to one of 5 AI pipelines. Each pipeline is a DAG of Claude agents and deterministic tools, executed in topological layers. You'll see the live graph render here in real time.
-                      </p>
-                      <ul className="text-[12.5px] space-y-1.5 text-foreground/85">
-                        <li>• <span className="font-mono">proactive_consolidation</span> — find redundant suppliers</li>
-                        <li>• <span className="font-mono">supplier_fallout</span> — react to supplier disruption</li>
-                        <li>• <span className="font-mono">price_audit</span> — flag pricing outliers</li>
-                        <li>• <span className="font-mono">substitution_discovery</span> — search Molport / PubChem</li>
-                        <li>• <span className="font-mono">new_ingredient_research</span> — regulatory sweep</li>
-                      </ul>
+                {/* Orb + controls */}
+                <div className="flex flex-col items-center">
+                  <OrbHero
+                    size={activeRunId ? 180 : 240}
+                    onNavigateTo={setTab}
+                  />
+                  {!activeRunId && (
+                    <div className="mt-6 w-full max-w-sm space-y-2">
+                      <div className="rounded-lg border border-dashed border-border p-3 text-[12px] text-muted-foreground space-y-1">
+                        <p className="font-medium text-foreground/80 text-[12px]">Try asking</p>
+                        <p>"Find consolidation opportunities for Vitamin C"</p>
+                        <p>"What's our best Magnesium supplier?"</p>
+                        <p>"Audit prices on Omega-3 ingredients"</p>
+                      </div>
                     </div>
                   )}
                 </div>
+
+                {/* "How Agnes thinks" — only shown when idle */}
+                {!activeRunId && (
+                  <div className="rounded-xl border border-border bg-surface-subtle/40 p-8">
+                    <p className="text-[13px] font-medium text-foreground mb-1">How Agnes thinks</p>
+                    <p className="text-[12.5px] text-muted-foreground leading-relaxed mb-4">
+                      When you speak to Agnes, your transcript is routed to one of 5 AI pipelines. Each pipeline is a DAG of Claude agents and deterministic tools, executed in topological layers. You'll see the live graph render here in real time.
+                    </p>
+                    <ul className="text-[12.5px] space-y-1.5 text-foreground/85">
+                      <li>• <span className="font-mono">proactive_consolidation</span> — find redundant suppliers</li>
+                      <li>• <span className="font-mono">supplier_fallout</span> — react to supplier disruption</li>
+                      <li>• <span className="font-mono">price_audit</span> — flag pricing outliers</li>
+                      <li>• <span className="font-mono">substitution_discovery</span> — search Molport / PubChem</li>
+                      <li>• <span className="font-mono">new_ingredient_research</span> — regulatory sweep</li>
+                    </ul>
+                  </div>
+                )}
               </div>
             ) : tab === "opportunities" ? <OpportunitiesView />
               : tab === "ingredients" ? <IngredientsView />
@@ -103,6 +112,7 @@ const Index = () => {
               : tab === "proposals" ? <ProposalsView />
               : tab === "runs" ? <PipelineRunsView />
               : tab === "regulatory" ? <RegulatoryAlertsView />
+              : tab === "routes" ? <TradeRoutesView />
               : <SuppliersView />
             }
           </div>

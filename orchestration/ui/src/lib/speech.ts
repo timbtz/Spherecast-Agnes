@@ -60,7 +60,17 @@ export function startSpeech(opts: {
     }
     if (interim) opts.onInterim?.(interim);
   };
-  rec.onerror = (ev) => opts.onError?.(ev.error ?? "speech error");
+  const ERROR_LABELS: Record<string, string> = {
+    "not-allowed": "Microphone access denied. Allow mic in browser settings, or access the app via HTTPS.",
+    "service-not-allowed": "Speech recognition is not permitted on this origin (requires HTTPS).",
+    "no-speech": "No speech detected — try speaking closer to your microphone.",
+    "audio-capture": "No microphone found. Check that a mic is connected.",
+    "network": "Network error during speech recognition. Check your connection.",
+    "aborted": "Speech recognition was aborted.",
+    "bad-grammar": "Speech grammar error.",
+    "language-not-supported": "Language not supported by speech recognition.",
+  };
+  rec.onerror = (ev) => opts.onError?.(ERROR_LABELS[ev.error ?? ""] ?? ev.error ?? "speech error");
   rec.onend = () => {
     if (finalText.trim()) opts.onFinal(finalText.trim());
     opts.onEnd?.();

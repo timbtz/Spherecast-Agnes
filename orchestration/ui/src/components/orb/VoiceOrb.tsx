@@ -1,7 +1,15 @@
 import { Canvas, useFrame } from "@react-three/fiber";
-import { Suspense, useMemo, useRef } from "react";
+import { Component, Suspense, useMemo, useRef } from "react";
+import type { ReactNode } from "react";
 import * as THREE from "three";
 import type { OrbState } from "@/store/agnesStore";
+
+// Error boundary: catches WebGL / Three.js failures and renders a CSS fallback.
+class OrbErrorBoundary extends Component<{ children: ReactNode; fallback: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  render() { return this.state.failed ? this.props.fallback : this.props.children; }
+}
 
 // State → (primary, accent) color pair. The orb is two-tone like the brand logo:
 // a pearlescent inner highlight + a brand-tinted outer rim that shifts per state.
@@ -176,35 +184,60 @@ interface VoiceOrbProps {
   size?: number;
 }
 
-export function VoiceOrb({ state, level, size = 220 }: VoiceOrbProps) {
+// CSS-only fallback orb shown when WebGL is unavailable.
+function OrbFallback({ state, level, size }: VoiceOrbProps) {
   return (
     <div
-      className="relative"
+      className="relative rounded-full flex items-center justify-center"
       style={{ width: size, height: size }}
       aria-label={`Agnes voice orb — ${state}`}
       role="img"
     >
-      {/* Outer soft glow ring driven by state */}
       <div
-        className="absolute inset-0 rounded-full pointer-events-none transition-colors duration-500"
+        className="absolute inset-0 rounded-full transition-all duration-500"
         style={{
-          background: `radial-gradient(circle at 50% 50%, ${STATE_COLORS[state]}33 0%, transparent 65%)`,
-          filter: "blur(18px)",
-          transform: `scale(${1 + level * 0.18})`,
+          background: `radial-gradient(circle at 35% 35%, #ffffff55, ${STATE_COLORS[state]}cc 55%, ${STATE_COLORS[state]} 100%)`,
+          boxShadow: `0 0 ${30 + level * 40}px ${STATE_COLORS[state]}88`,
+          transform: `scale(${1 + level * 0.12})`,
         }}
       />
-      <Canvas
-        camera={{ position: [0, 0, 2.6], fov: 45 }}
-        gl={{ antialias: true, alpha: true, powerPreference: "high-performance" }}
-        dpr={[1, 2]}
-        style={{ background: "transparent" }}
-      >
-        <ambientLight intensity={0.6} />
-        <pointLight position={[2, 3, 4]} intensity={0.8} />
-        <Suspense fallback={null}>
-          <OrbMesh state={state} level={level} />
-        </Suspense>
-      </Canvas>
     </div>
+  );
+}
+
+export function VoiceOrb({ state, level, size = 220 }: VoiceOrbProps) {
+  const fallback = <OrbFallback state={state} level={level} size={size} />;
+  return (
+    <OrbErrorBoundary fallback={fallback}>
+      <div
+        className="relative"
+        style={{ width: size, height: size }}
+        aria-label={`Agnes voice orb — ${state}`}
+        role="img"
+      >
+        {/* Outer soft glow ring driven by state */}
+        <div
+          className="absolute inset-0 rounded-full pointer-events-none transition-colors duration-500"
+          style={{
+            background: `radial-gradient(circle at 50% 50%, ${STATE_COLORS[state]}14 0%, transparent 60%)`,
+            filter: "blur(22px)",
+            transform: `scale(${1 + level * 0.18})`,
+          }}
+        />
+        <Canvas
+          camera={{ position: [0, 0, 2.6], fov: 45 }}
+          gl={{ antialias: true, alpha: true, powerPreference: "high-performance" }}
+          dpr={[1, 2]}
+          style={{ background: "transparent" }}
+          onCreated={({ gl }) => gl.setClearColor(0x000000, 0)}
+        >
+          <ambientLight intensity={0.6} />
+          <pointLight position={[2, 3, 4]} intensity={0.8} />
+          <Suspense fallback={null}>
+            <OrbMesh state={state} level={level} />
+          </Suspense>
+        </Canvas>
+      </div>
+    </OrbErrorBoundary>
   );
 }

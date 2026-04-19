@@ -1,6 +1,23 @@
 // Domain types for the Agnes / Spherecast API surface.
 export type Grade = "supplement" | "food" | "excipient" | "sweetener" | "flavor";
 
+export type ProvenanceConfidence =
+  | "vendor_verified"
+  | "website_explicit"
+  | "directory_listing"
+  | "model_inferred"
+  | "unknown";
+
+export type UrlHealth = "ok" | "stale" | "unreachable" | "not_checked";
+
+export interface Lane {
+  origin: string;
+  dest: string;
+  mode: "ocean" | "air" | "truck" | "rail";
+  lead_time_days: number;
+  cost_usd_per_kg: number;
+}
+
 export interface Ingredient {
   id: string;
   display_name: string;
@@ -129,6 +146,12 @@ export interface ScoredSupplier {
   lead_time_score: number;
   quality_score: number;
   weighted_score: number;
+  // provenance fields — returned by extended /api/scoring/suppliers/{id}
+  provenance_confidence?: ProvenanceConfidence | null;
+  corroboration_score?: number | null;
+  url_health?: UrlHealth | null;
+  vetted?: boolean | null;
+  url_archetype?: string | null;
 }
 
 export interface FdaLimit {

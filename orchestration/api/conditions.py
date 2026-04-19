@@ -57,6 +57,16 @@ def has_regulatory_drift(ctx: AgnesContext) -> bool:
     return bool(out.get("drift_alerts"))
 
 
+def needs_supplier_research(ctx: AgnesContext) -> bool:
+    """True when DB alternatives are sparse (< 3) or missing lead-time data, warranting fresh web research."""
+    out = ctx.get("find-alternatives", {})
+    alts = out.get("alternatives", [])
+    if len(alts) < 3:
+        return True
+    # All alternatives are web-scraped with no lead times — not actionable for procurement
+    return all(a.get("Lead_Time_Days") is None for a in alts)
+
+
 _REGISTRY: dict[str, ConditionFn] = {
     "has_alternatives": has_alternatives,
     "above_score_threshold": above_score_threshold,
@@ -68,6 +78,7 @@ _REGISTRY: dict[str, ConditionFn] = {
     "has_stale_prices": has_stale_prices,
     "has_price_alerts": has_price_alerts,
     "has_regulatory_drift": has_regulatory_drift,
+    "needs_supplier_research": needs_supplier_research,
 }
 
 

@@ -102,6 +102,10 @@ export function useAgnes() {
   const startListening = useCallback(async () => {
     if (isActive) return;
     setError(null);
+    if (!window.isSecureContext) {
+      setError("Microphone requires a secure connection. Access the app via HTTPS (or localhost for dev).");
+      return;
+    }
     if (!isSpeechRecognitionSupported()) {
       setError("Voice input not supported in this browser. Use Chrome or Edge.");
       return;
@@ -145,5 +149,5 @@ export function useAgnes() {
 
   useEffect(() => () => cleanupAll(), [cleanupAll]);
 
-  return { startListening, stop, speak, isActive, error, activeRunId, setGraph };
+  return { startListening, stop, speak, isActive, error, activeRunId, setGraph, sendText: handleTranscript };
 }

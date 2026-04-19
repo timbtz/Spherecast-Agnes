@@ -54,6 +54,21 @@ SEED_LANES: List[LaneSeed] = [
 ]
 
 
+def ensure_lane_cost_table(conn: sqlite3.Connection) -> None:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS Lane_Cost (
+            Id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            OriginCountry TEXT NOT NULL,
+            DestCountry   TEXT NOT NULL,
+            Mode          TEXT NOT NULL,
+            LeadTimeDays  REAL NOT NULL,
+            CostUSDPerKg  REAL NOT NULL,
+            LastUpdated   TEXT DEFAULT (datetime('now'))
+        )
+    """)
+    conn.commit()
+
+
 def seed_lane_costs(conn: sqlite3.Connection) -> int:
     """Idempotent — skips lanes that already exist for (origin, dest, mode)."""
     conn.execute("BEGIN")
@@ -80,3 +95,14 @@ def seed_lane_costs(conn: sqlite3.Connection) -> int:
         inserted += 1
     conn.commit()
     return inserted
+
+
+if __name__ == "__main__":
+    from pathlib import Path
+    db_path = Path(__file__).parent.parent.parent / "db_enriched.sqlite"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA journal_mode=WAL")
+    ensure_lane_cost_table(conn)
+    n = seed_lane_costs(conn)
+    conn.close()
+    print(f"Lane_Cost seeded: {n} new rows inserted")

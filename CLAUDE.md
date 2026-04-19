@@ -62,12 +62,16 @@
 | `enrichment/sources/fda_iid_changelog.py` | ✅ Complete + run | Loads Change_Log_Data.csv → FDA_IID_Change_Log; fuzzy name matching; accepts optional csv_path |
 | `enrichment/backfill_iid_changelog.py` | ✅ Complete + run | Top-level runner: migrate + CSV load; idempotent |
 | `orchestration/tools/regulatory_drift_tool.py` | ✅ Complete | Pairs C rows, assigns severity HIGH/MEDIUM/LOW, cross-refs Consolidation_Opportunity |
+| `orchestration/agents/reactive_agent.py` | ✅ Fixed | Bug fixed: was reading `gate-qualify` (wrong key), now reads `gate-compliance`; also consumes `web-research` output |
+| `orchestration/pipelines/supplier_fallout.yaml` | ✅ Updated | Added `web-research` (ResearchAgent) node gated by `needs_supplier_research`; `write-proposal` now depends on it |
+| `orchestration/api/conditions.py` | ✅ Updated | Added `needs_supplier_research`: fires when DB alternatives < 3 or all have no Lead_Time_Days |
 | `orchestration/agents/regulatory_research_agent.py` | ✅ Complete | Searches FDA quarterly change log; downloads CSV if found; graceful fallback on failure |
 | `orchestration/agents/regulatory_drift_agent.py` | ✅ Complete | Gemini narrative for drift alerts; writes regulatory_drift_flag to DB |
 | `orchestration/pipelines/regulatory_drift_alert.yaml` | ✅ Complete | 4-node: fetch-latest-changes → scan-drift → find-alternatives → write-alerts |
 | `enrichment/db_migrate_price_monitor.py` | ✅ Complete + run | Creates Price_Change_Alert table + indexes; idempotent |
 | `enrichment/enrichers/supplier_web_enricher.py` | ✅ New | Async; calls search_sub_agent, parses JSON, upserts Supplier_Commercial; Price_Source='google_search' |
 | `enrichment/backfill_supplier_web.py` | ✅ New | Batch script; requires GOOGLE_API_KEY; run to populate Supplier_Commercial from web |
+| `enrichment/backfill_supplier_curated.py` | ✅ Complete + run | Curated bulk pricing for 117 missing ingredients + backfill 31 null prices; Supplier_Commercial now 239/250 (95.6%) covered |
 | `orchestration/tools/price_staleness_checker.py` | ✅ New | Sync DAG tool; finds UNII canonicals with missing/stale web prices (>7d) |
 | `orchestration/agents/price_fetch_agent.py` | ✅ New | Async DAG agent; fetches prices via search_sub_agent; writes Price_Change_Alert on >=15% change |
 | `orchestration/agents/price_alert_writer.py` | ✅ New | Async DAG agent; Gemini narrative; persists to Price_Change_Alert.Alert_Narrative |
@@ -80,6 +84,12 @@
 | `orchestration/tools/compliance_reasoner_tool.py` | ✅ Augmented | Returns fda_iid_max_daily_mg, fda_iid_routes; persists refuse/defer to Refusal_Log |
 | `enrichment/db_migrate_citation_refusal.py` | ✅ Complete + run | Claim_Citation + Refusal_Log tables; 4 demo trap seeds; idempotent |
 | `orchestration/ui/src/components/views/RegulatoryAlertsView.tsx` | ✅ New | Severity-filtered alert cards with before/after MDE snapshots |
+| `orchestration/ui/src/components/dag/DagGraphView.tsx` | ✅ Overhauled | Node cards show humanized class name + `when` condition; output panel moves BELOW canvas (no clipping); `alert_narrative` recognized as prose; collapsible array fields |
+| `orchestration/ui/src/components/views/ComplianceView.tsx` | ✅ Improved | Search input + All/Confirmed/Implied filter; "Confirmed" legend label; tooltip on cells explaining implied derivation |
+| `orchestration/ui/src/components/views/SuppliersView.tsx` | ✅ Reworked | 7-col grid: +Trust col (provenance badge, corroboration dots, URL health dot, vetted stamp); weighted score col shows overall + Price/Lead/Quality mini bars; hover tooltip with sub-score breakdown + provenance notes |
+| `orchestration/ui/src/components/views/TradeRoutesView.tsx` | ✅ New | Filterable lane table: Origin→Dest, Mode (icons), Lead Time, Cost, Landed Cost Index bar; mock data via agnesApi.lanes(); TODO: wire to /api/data/lanes |
+| `orchestration/ui/src/types/agnes.ts` | ✅ Extended | Added ProvenanceConfidence, UrlHealth, Lane types; ScoredSupplier extended with provenance_confidence, corroboration_score, url_health, vetted, url_archetype |
+| `orchestration/ui/src/components/orb/VoiceOrb.tsx` | ✅ Fixed | OrbErrorBoundary wraps Canvas; WebGL failure renders CSS gradient fallback instead of crashing app |
 | `orchestration/ui/src/hooks/usePriceAlerts.ts` | ✅ New | `usePriceAlertCount()` — polls /api/alerts/count every 60s |
 | `enrichment/sources/rxnorm.py` | ❌ Missing | Low priority — narrow use (drug-class ingredients only) |
 | `enrichment/sources/fdc.py` | ❌ Missing | Low priority — only useful for ~5 food-macro SKUs |

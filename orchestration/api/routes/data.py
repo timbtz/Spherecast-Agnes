@@ -14,7 +14,6 @@ _DB = Path(__file__).parent.parent.parent.parent / "db_enriched.sqlite"
 def get_db():
     conn = sqlite3.connect(f"file:{_DB}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
 
@@ -255,6 +254,20 @@ def proposal_citations(opportunity_id: int):
         return {"opportunity_id": opportunity_id, "citations": [dict(r) for r in rows], "count": len(rows)}
     except Exception:
         return {"opportunity_id": opportunity_id, "citations": [], "count": 0}
+
+
+@router.get("/lanes")
+def lanes():
+    with get_db() as db:
+        rows = db.execute("""
+            SELECT Id as id, OriginCountry as origin, DestCountry as dest,
+                   Mode as mode, LeadTimeDays as lead_time_days,
+                   CostUSDPerKg as cost_usd_per_kg,
+                   LastUpdated as last_updated
+            FROM Lane_Cost
+            ORDER BY OriginCountry, DestCountry, Mode
+        """).fetchall()
+    return {"lanes": [dict(r) for r in rows], "count": len(rows)}
 
 
 @router.get("/refusals")

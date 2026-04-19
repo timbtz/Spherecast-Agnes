@@ -37,3 +37,9 @@ Thumbs.db
 
 # Local dev — contributor work, not part of main branch
 local-dev/
+
+# Molport — large downloaded files, not committed
+db_molport_index.sqlite
+Orchestration/Data/All\ Stock\ Compounds/*.sdf.gz
+Orchestration/Data/All\ Stock\ Compounds/SMILES/*.txt.gz
+Orchestration/Data/All\ Stock\ Compounds/Changed\ Since\ Previous\ Update/*.gz

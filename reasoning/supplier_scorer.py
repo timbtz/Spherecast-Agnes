@@ -48,9 +48,13 @@ class SupplierScorer:
                       sc.Purity_Pct, sc.Grade_Unverified, sc.Confidence,
                       sc.Country_Origin, sc.Country_Shipping,
                       sc.Price_Source, sc.Price_Type,
-                      sc.Purity_Qualifier, sc.Last_Updated
+                      sc.Purity_Qualifier, sc.Last_Updated,
+                      sc.Provenance_Confidence, sc.Corroboration_Score,
+                      sc.URL_Archetype, sc.URL_Health,
+                      COALESCE(sm.Vetted, 0) as vetted
                FROM Supplier_Commercial sc
                JOIN Supplier s ON s.Id = sc.SupplierId
+               LEFT JOIN Supplier_Master sm ON sm.SupplierId = sc.SupplierId
                WHERE sc.CanonicalIngredientId = ?""",
             (canonical_ingredient_id,),
         ).fetchall()
