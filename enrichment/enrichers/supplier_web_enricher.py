@@ -217,6 +217,82 @@ def _parse_moq(moq_str: str | None) -> float | None:
     return round(val, 3)
 
 
+# Matches a percentage the model may emit inside a grade / purity / spec /
+# evidence / qualifier string. We ONLY trust an explicit `%` suffix —
+# trigger-word heuristics ("grade", "pure", "minimum") produce too many
+# false positives because product names in this domain lean on those words
+# (e.g. "Pure Biotin Powder", "Vitamin E T-50", "Lab Grade, $94.14"). False
+# positives in Purity_Pct are worse than missing values because downstream
+# gating treats Purity_Pct as a spec-fit signal.
+_PCT_WITH_SIGN = re.compile(
+    r"(?:≥|>=|≤|<=|~|=|>|<)?\s*(\d{2,3}(?:\.\d+)?)\s*%"
+)
+
+# Words that, when they immediately follow a `NN%` token, indicate the number
+# is NOT a purity claim — it's a price premium, discount, margin, commission,
+# etc. ("50% premium", "30% cheaper", "10% off", "20% discount").
+_PCT_NON_PURITY_CONTEXT = re.compile(
+    r"^\s*(?:premium|cheaper|discount|off|higher|lower|more|less|margin|commission|markup|savings?|bigger|smaller)\b",
+    re.IGNORECASE,
+)
+
+
+def _parse_purity_pct(*candidates: str | list | None) -> float | None:
+    """Extract a numeric purity percentage from one or more text candidates.
+
+    The model emits purity info unpredictably — sometimes under `grade`,
+    sometimes under `purity`, sometimes buried in `evidence_snippet`, and
+    sometimes comma-tokenised into the `certifications` list (e.g. the
+    ``["≥", "9", "8"]`` pathology seen in the enriched DB). This function
+    walks candidates in priority order and returns the first plausible
+    percentage in the 50–100 range (purities below 50% are almost always
+    noise — e.g. "40% of stearic acid content").
+
+    Returns None when no candidate yields a plausible value.
+    """
+    for cand in candidates:
+        if not cand:
+            continue
+        if isinstance(cand, list):
+            text = " ".join(str(c) for c in cand if c)
+        else:
+            text = str(cand)
+        # 1) Explicit "XX%" / "≥XX%" / ">=XX.X%" — strongest signal.
+        # Hyphenated ranges ("98-99%") look like a detached first number
+        # followed by a second number with a %. Prepend the detached number
+        # so the regex can catch both and we pick the conservative (lower)
+        # value — a "98-99%" claim is a promise of ≥98%.
+        explicit_matches: list[float] = []
+        for m in _PCT_WITH_SIGN.finditer(text):
+            try:
+                val = float(m.group(1))
+            except ValueError:
+                continue
+            if not (50.0 <= val <= 100.0):
+                continue
+            # Reject if the `%` is followed by a price/margin context word
+            # ("50% premium", "30% cheaper", "10% off" …). These are monetary
+            # commentary, not purity claims.
+            tail = text[m.end(): m.end() + 24]
+            if _PCT_NON_PURITY_CONTEXT.match(tail):
+                continue
+            explicit_matches.append(val)
+            # Also pick up a range peer like "98-99%": the leading number
+            # in the hyphenated range sits right before the matched span.
+            start = m.start()
+            peer = re.search(r"(\d{2,3}(?:\.\d+)?)\s*-\s*$", text[:start])
+            if peer:
+                try:
+                    peer_val = float(peer.group(1))
+                except ValueError:
+                    peer_val = None
+                if peer_val is not None and 50.0 <= peer_val <= 100.0:
+                    explicit_matches.append(peer_val)
+        if explicit_matches:
+            return round(min(explicit_matches), 2)
+    return None
+
+
 def _normalize_certs(raw_certs) -> list[str]:
     """Coerce to list[str]. Handles list, comma-string, single string, None."""
     if not raw_certs:
@@ -499,6 +575,12 @@ class SupplierWebEnricher:
 
         price = _parse_price(price_raw)
         moq = _parse_moq(moq_raw)
+        # Parse numeric Purity_Pct from whichever field the model decided to
+        # stash purity info in. Priority: explicit grade/purity/spec field >
+        # the cert list we just assembled (captures cases where models
+        # comma-tokenised "≥98" into the cert array) > evidence snippet.
+        grade_raw = _first(parsed, _GRADE_KEYS)
+        purity_pct = _parse_purity_pct(grade_raw, certs, purity_qualifier, evidence)
 
         # --- Provenance gate 1: URL blocklist.
         # Reject the whole row if the source URL is on a known non-supplier
@@ -530,11 +612,12 @@ class SupplierWebEnricher:
             """INSERT OR REPLACE INTO Supplier_Commercial
                (SupplierId, CanonicalIngredientId, Price_USD_Per_KG, MOQ_KG,
                 Country_Origin, Price_Type, Price_Source, Confidence,
-                Source_URL, Last_Updated, Grade_Unverified, Purity_Qualifier,
-                Provenance_Confidence, Evidence_Snippet, URL_Archetype)
-               VALUES (?, ?, ?, ?, ?, 'web_search', 'google_search', ?, ?, datetime('now'), 1, ?, ?, ?, ?)""",
+                Source_URL, Last_Updated, Grade_Unverified, Purity_Pct,
+                Purity_Qualifier, Provenance_Confidence, Evidence_Snippet,
+                URL_Archetype)
+               VALUES (?, ?, ?, ?, ?, 'web_search', 'google_search', ?, ?, datetime('now'), 1, ?, ?, ?, ?, ?)""",
             (supplier_id, canonical_id, price, moq, country, _CONFIDENCE_WEB, url,
-             purity_qualifier, provenance, evidence, archetype)
+             purity_pct, purity_qualifier, provenance, evidence, archetype)
         )
         return True
 
