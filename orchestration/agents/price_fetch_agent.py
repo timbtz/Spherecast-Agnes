@@ -39,11 +39,16 @@ async def run(ctx: AgnesContext) -> dict:
         return {"alerts_created": [], "suppliers_updated": 0, "count": 0, "skipped": "GOOGLE_API_KEY not set"}
 
     from orchestration.agents.search_sub_agent import search
-    from enrichment.enrichers.supplier_web_enricher import _parse_suppliers, SupplierWebEnricher
+    from enrichment.enrichers.supplier_web_enricher import (
+        _parse_suppliers, SupplierWebEnricher,
+        _first, _PRICE_KEYS, _URL_KEYS,
+    )
 
     enricher = SupplierWebEnricher(ctx.enriched_db_path)
     alerts_created = []
     suppliers_updated = 0
+    found_ingredients = 0
+    failed_ingredients = []
 
     for item in stale:
         canonical_id = item["canonical_id"]
@@ -54,21 +59,28 @@ async def run(ctx: AgnesContext) -> dict:
             raw = await search(name, query_hint="bulk supplier B2B price per kg 2025")
         except Exception as e:
             logger.warning(f"Search failed for {name}: {e}")
+            failed_ingredients.append({"ingredient": name, "reason": "search_error"})
             continue
 
         parsed_suppliers = _parse_suppliers(raw, name)
         if not parsed_suppliers:
+            logger.warning(f"  {name}: parser returned 0 suppliers")
+            failed_ingredients.append({"ingredient": name, "reason": "parse_empty"})
             continue
 
         conn = sqlite3.connect(str(ctx.enriched_db_path))
         conn.execute("PRAGMA journal_mode=WAL")
         conn.row_factory = sqlite3.Row
 
+        written_for_ingredient = 0
         for s in parsed_suppliers:
             sname = (s.get("supplier_name") or "").strip()[:200]
             if not sname or sname == "research_result":
                 continue
-            new_price = _parse_price(s.get("price_range_usd_per_kg"))
+            # Defensive field-name lookup — the model sometimes returns
+            # `price_range` or `price` instead of `price_range_usd_per_kg`.
+            price_raw = _first(s, _PRICE_KEYS)
+            new_price = _parse_price(price_raw)
             if new_price is None:
                 continue
 
@@ -82,8 +94,12 @@ async def run(ctx: AgnesContext) -> dict:
 
             old_price = existing["Price_USD_Per_KG"] if existing else None
 
-            enricher._write_commercial(conn, supplier_id, canonical_id, s, s.get("website"))
+            url = _first(s, _URL_KEYS)
+            if not enricher._write_commercial(conn, supplier_id, canonical_id, s, url):
+                # QC-rejected — skip alert generation too
+                continue
             suppliers_updated += 1
+            written_for_ingredient += 1
 
             if old_price and old_price > 0:
                 change_pct = (new_price - old_price) / old_price
@@ -111,8 +127,22 @@ async def run(ctx: AgnesContext) -> dict:
         conn.commit()
         conn.close()
 
+        if written_for_ingredient > 0:
+            found_ingredients += 1
+            logger.info(f"  {name}: {written_for_ingredient} supplier rows written")
+        else:
+            logger.warning(
+                f"  {name}: found {len(parsed_suppliers)} suppliers in search, "
+                f"but 0 usable after parse/QC (field-name mismatch, price unparseable, "
+                f"or all outliers)"
+            )
+            failed_ingredients.append({"ingredient": name, "reason": "no_usable_rows"})
+
     return {
         "alerts_created": alerts_created,
         "suppliers_updated": suppliers_updated,
         "count": len(alerts_created),
+        "found_ingredients": found_ingredients,
+        "failed_ingredients": failed_ingredients,
+        "stale_total": len(stale),
     }
