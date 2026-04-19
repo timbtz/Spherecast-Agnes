@@ -2,6 +2,7 @@ name: price_audit
 trigger: chat
 # US-05: Benchmark prices for an ingredient, flag above-market suppliers,
 # and identify consolidation opportunity if fragmentation is high.
+# Fallback: if benchmark-prices finds no data, emit a grounded explanation.
 nodes:
   - id: benchmark-prices
     tool_class: PriceBenchmarkTool
@@ -20,3 +21,8 @@ nodes:
     agent_class: ProposalWriter
     depends_on: [benchmark-prices, find-alternatives, bom-impact]
     when: has_price_deviations
+
+  - id: no-data-fallback
+    tool_class: NoDataExplainerTool
+    depends_on: [benchmark-prices]
+    when: no_price_data_found

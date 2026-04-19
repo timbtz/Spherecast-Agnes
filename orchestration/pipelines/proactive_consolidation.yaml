@@ -2,6 +2,11 @@ name: proactive_consolidation
 trigger: data_update
 # US-02: Proactive weekly/on-data-change consolidation scan.
 # Ranks opportunities, maps BOM impact, generates executive proposals.
+# Also chat-triggered: router can pass `ingredient_filter` to scope the scan to a
+# specific ingredient family (e.g. "stearate"). When the filter matches nothing
+# (or the catalog has no opportunities above threshold), the no-opportunity
+# explainer emits a grounded message so the user doesn't get a blank proposal
+# for an unrelated ingredient.
 nodes:
   - id: scan-opportunities
     tool_class: OpportunityRankerTool
@@ -11,3 +16,8 @@ nodes:
     agent_class: ProactiveAgent
     depends_on: [scan-opportunities]
     when: above_score_threshold
+
+  - id: no-opportunity-fallback
+    tool_class: NoOpportunityExplainerTool
+    depends_on: [scan-opportunities]
+    when: no_opportunities_found

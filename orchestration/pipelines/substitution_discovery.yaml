@@ -2,6 +2,8 @@ name: substitution_discovery
 trigger: chat
 # US-07: Find functionally equivalent substitutes for an ingredient.
 # Walks substitution graph, checks compliance, assesses BOM impact, drafts proposal.
+# Fallback: if the substitution walker returns no rows, emit a grounded explanation
+# instead of silently completing with no output.
 nodes:
   - id: find-substitutes
     tool_class: SubstitutionWalkerTool
@@ -30,3 +32,8 @@ nodes:
     agent_class: ProposalWriter
     depends_on: [gate-compliance, find-alternatives, bom-impact, benchmark-prices]
     when: has_substitutes
+
+  - id: no-data-fallback
+    tool_class: NoDataExplainerTool
+    depends_on: [find-substitutes]
+    when: no_substitutes_found

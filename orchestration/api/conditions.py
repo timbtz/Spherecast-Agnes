@@ -57,6 +57,25 @@ def has_regulatory_drift(ctx: AgnesContext) -> bool:
     return bool(out.get("drift_alerts"))
 
 
+def no_substitutes_found(ctx: AgnesContext) -> bool:
+    """True when the substitution_walker ran but returned an empty list."""
+    out = ctx.get("find-substitutes", {})
+    # Must have run (key present) and must be empty
+    return "find-substitutes" in ctx.node_outputs and not out.get("substitutes")
+
+
+def no_price_data_found(ctx: AgnesContext) -> bool:
+    """True when price_benchmark ran but produced no annotated prices."""
+    out = ctx.get("benchmark-prices", {})
+    return "benchmark-prices" in ctx.node_outputs and not out.get("annotated_prices")
+
+
+def no_opportunities_found(ctx: AgnesContext) -> bool:
+    """Inverse of above_score_threshold — true when scan produced no rows."""
+    out = ctx.get("scan-opportunities", {})
+    return len(out.get("opportunities", [])) == 0
+
+
 _REGISTRY: dict[str, ConditionFn] = {
     "has_alternatives": has_alternatives,
     "above_score_threshold": above_score_threshold,
@@ -68,6 +87,9 @@ _REGISTRY: dict[str, ConditionFn] = {
     "has_stale_prices": has_stale_prices,
     "has_price_alerts": has_price_alerts,
     "has_regulatory_drift": has_regulatory_drift,
+    "no_substitutes_found": no_substitutes_found,
+    "no_price_data_found": no_price_data_found,
+    "no_opportunities_found": no_opportunities_found,
 }
 
 
