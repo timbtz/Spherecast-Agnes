@@ -4,10 +4,40 @@
 **Repo:** https://github.com/timbtz/Spherecast-Agnes
 **Team strategy doc:** `Agnes-Team-Playbook` (v3.2 condensed) — the source of truth for the bet we made and the yardstick we measured against.
 
-This README is a reflective write-up of what we attempted, what we actually shipped, where we fell short, and what we would change given another run at it. The live documentation of the system itself (setup, endpoints, schema) lives in the repo's main `README.md` and `CLAUDE.md`; this document is the judging-pass companion.
+This README is a reflective write-up of what we attempted, what we actually shipped, where we fell short, and what we would change given another run at it. The Quickstart below covers running the system locally; everything after Section 1 is the judging-pass companion.
 
 ---
-![UI](UI.png)
+
+## Quickstart
+
+**Prerequisites:** Python 3.12, [Bun](https://bun.sh), SQLite. Optional: ElevenLabs key for the voice orb.
+
+```bash
+# 1. Install Python deps
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+# 2. Configure secrets
+cp .env.template .env
+# Fill in at minimum: ANTHROPIC_API_KEY, GOOGLE_API_KEY, DSLD_API_KEY
+# (Optional: USDA_FDC_API_KEY, OPEN_FDA_API_KEY, MOLPORT_API_KEY, ElevenLabs)
+
+# 3. Build the UI (Lovable-synced React app served at /)
+cd orchestration/ui
+cp .env.example .env   # set VITE_AGNES_API_URL=http://localhost:8000
+bun install && bun run build
+cd ../..
+
+# 4. Start FastAPI (serves API + UI from one port)
+PYTHONPATH=. uvicorn orchestration.api.main:app --reload --port 8000
+```
+
+Open http://localhost:8000 — the React UI is served from `orchestration/ui/dist/`. API docs live at `/docs`.
+
+**Re-pull the UI from Lovable:** `./pull-ui.sh` (then restart FastAPI).
+**Schema:** `schema/enriched_schema.sql` (v1.1). Database file `db_enriched.sqlite` is committed.
+
+---
 
 ## 1. General approach
 
@@ -112,9 +142,8 @@ For reference — mapped from the playbook to where each criterion currently lan
 
 ## 6. Key links
 
-- Main developer README: `README.md`
-- Live-state log (agent-maintained): `CLAUDE.md`
 - Locked schema: `schema/enriched_schema.sql`
+- Env template: `.env.template`
 - Strategy source: `Agnes-Team-Playbook` (v3.2 condensed)
 - Missing-tools catalogue: `Orchestration/To-Do/missing-tools.md`
 - Missing-workers catalogue: `Orchestration/To-Do/missing-workers.md`

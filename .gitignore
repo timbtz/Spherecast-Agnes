@@ -38,6 +38,21 @@ Thumbs.db
 # Local dev — contributor work, not part of main branch
 local-dev/
 
+# Claude Code workspace
+.claude/
+CLAUDE.md
+
+# Python bytecode dirs (pattern *.pyc alone misses dirs)
+__pycache__/
+
+# Hackathon dev notes
+CHANGES/
+
+# Demo screenshots
+testing/screenshots/
+testing/frontend/screenshots/
+UI.png
+
 # Molport — large downloaded files, not committed
 db_molport_index.sqlite
 Orchestration/Data/All\ Stock\ Compounds/*.sdf.gz
