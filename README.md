@@ -1,30 +1,78 @@
-# Agnes — Contributor & Briefing Guide
+# Agnes — AI Supply Chain Intelligence for CPG Supplements
 
 **Project:** Spherecast Agnes  
-**Type:** Hackathon MVP  
-**Mission:** AI-powered supply chain intelligence for CPG supplement companies  
-**Stack:** Python · SQLite · FastAPI · Claude API (Anthropic) · Google ADK · Vite + React
+**Stack:** Python · SQLite · FastAPI · Claude API (Anthropic) · Google ADK (Gemini) · Vite + React
 
 ---
 
-## What Is Agnes?
+## What Agnes Does
 
-Agnes is an AI supply chain manager for CPG (consumer packaged goods) supplement brands. The core problem it solves: hundreds of supplement companies source the same canonical ingredients (Vitamin C, Vitamin D3, Magnesium Glycinate) from different suppliers at different prices, quality tiers, and compliance levels — but none of them know what the others are paying or who the better suppliers are.
+Agnes is an AI supply chain manager for CPG supplement brands. The core problem: hundreds of supplement companies source the same canonical ingredients (Vitamin C, Vitamin D3, Magnesium Glycinate) from overlapping supplier pools at wildly different prices, quality tiers, and compliance levels — with no cross-company visibility.
 
-Agnes ingests raw SKU and BOM data, enriches it against public ingredient databases and commercial APIs, scores consolidation opportunities across companies, and orchestrates AI agents to surface actionable proposals: *"12 companies in your network all buy Vitamin C. Here's a supplier switch that saves 23% and maintains NSF certification."*
+Agnes ingests raw SKU and BOM data, enriches it against six public databases and commercial APIs, scores consolidation opportunities across all companies simultaneously, and dispatches AI agent pipelines to surface actionable proposals:
 
-The system is built in four stages:
+> *"12 companies in your network all buy Vitamin C. Switching to DSM (USP-certified, NL origin) saves 23% vs. your current supplier and maintains NSF certification. GLEIF-verified legal entity. RFQ formatted."*
+
+Every recommendation is anchored to live enriched data, runs through a 4-state compliance gate across four jurisdictions, and is fully traceable via a structured event log.
+
+---
+
+## Architecture
+
+Agnes is built in four stages, all complete and running:
 
 ```
-Stage 1 — API Exploration & Schema Lock    [COMPLETE]
-Stage 2 — Data Enrichment Pipeline         [COMPLETE through Phase 3]
-Stage 3 — Agent Orchestration              [COMPLETE — FastAPI + YAML pipelines live]
-Stage 4 — Frontend & Voice UI              [IN PROGRESS — Vite+React scaffolded at /ui]
+Stage 1 — API Exploration & Schema Design     [complete]
+Stage 2 — Data Enrichment Pipeline            [complete — all phases run]
+Stage 3 — Agent Orchestration                 [complete — FastAPI + 7 YAML pipelines live]
+Stage 4 — Voice + Chat UI                     [complete — React UI served at /]
 ```
 
-Full workflow rationale lives in [`Orchestration/PRDs/meta-workflow.md`](Orchestration/PRDs/meta-workflow.md). Read it before writing any new Stage 3 or 4 code. Everything in this README is a summary of that document.
+### How it fits together
 
-> **README self-maintenance rule:** After any meaningful change — phase run, new endpoint, UI feature, schema edit — update the relevant section of this file. This is a shared responsibility: every coding session that touches the repo should leave the README accurate.
+```
+User message (voice/text)
+        │
+        ▼
+┌──────────────────┐
+│  Router Agent    │  Gemini 2.5-flash intent classifier
+│  (compound-intent│  → primary pipeline + secondary_intents[]
+│   aware)         │  → prefilter for injection attempts
+└────────┬─────────┘
+         │ pipeline name + params
+         ▼
+┌──────────────────────────────────────────────────────┐
+│  DAG Executor   (dag_executor.py)                    │
+│  • Topological sort → parallel layers (asyncio)      │
+│  • Condition guards (14 named: when: clauses)        │
+│  • Every node logged to orchestration.db             │
+│  • Real-time SSE stream at /runs/{id}/stream         │
+└──────┬───────────────────────────────────────────────┘
+       │
+  ┌────┴──────────────────────────────┐
+  │                                   │
+  ▼                                   ▼
+Deterministic Tools (14)         AI Agents (8)
+supplier_alternatives            ReactiveAgent      (Claude)
+substitution_walker              ProactiveAgent     (Claude)
+compliance_reasoner_tool         ResearchAgent      (Claude + Gemini web)
+bom_impact                       ProposalWriter     (Claude)
+price_benchmark                  PriceFetchAgent    (Gemini web search)
+opportunity_ranker               PriceAlertWriter   (Gemini)
+rfq_formatter                    RegulatoryDriftAgent (Gemini)
+entity_verify (GLEIF)            RegulatoryResearchAgent (Gemini)
+regulatory_drift_tool
+price_staleness_checker
+no_data_explainer
+no_opportunity_explainer
+_ingredient_resolver (shared)
+       │
+       ▼
+┌──────────────────┐
+│  db_enriched     │  SQLite — persistent enrichment + reasoning layer
+│  .sqlite         │  Every Agnes-written field has source + confidence
+└──────────────────┘
+```
 
 ---
 
@@ -32,191 +80,226 @@ Full workflow rationale lives in [`Orchestration/PRDs/meta-workflow.md`](Orchest
 
 ```
 Agnes/
-├── .claude/                    # Claude Code skills and slash commands
-│   ├── commands/               # /commit, /create-prd, /plan-feature, etc.
-│   └── skills/                 # Reusable agent capabilities (browser, e2e-test)
-│
 ├── Orchestration/              # Planning & reference artefacts (uppercase — not code)
 │   ├── PRDs/                   # Product requirements; meta-workflow.md is canonical
-│   ├── Plans/                  # Step-by-step execution plans for specific tasks
-│   ├── References/             # Integration guides (*-guide.md) per API / tooling concern
-│   │   ├── APIS/               # dsld, molport, fdc, free-apis integration guides
-│   │   ├── Tech/General/       # FastAPI, SSE-streaming guides
-│   │   └── Tech/Orchestration/ # ADK, YAML pipeline schema, DAG canvas, ElevenLabs refs
+│   ├── Plans/                  # Step-by-step execution plans per task
+│   ├── References/             # Integration guides per API / tooling concern
 │   └── Data/
-│       ├── llm-wiki.md         # LLM-wiki pattern (optional Stage 4 export format)
+│       ├── supplier_wiki/      # Grade scoring context: supplements.md, excipients.md, food.md
 │       └── Spherecast/         # Raw Spherecast business context
 │
-├── enrichment/                 # Stage 2 — data pipeline (Phases 1–3)
+├── enrichment/                 # Stage 2 — data pipeline (Phases 1–4)
 │   ├── pipeline.py             # Entry point: python pipeline.py --phase 1|2|3
-│   ├── db_bootstrap.py         # Clone db.sqlite → db_enriched.sqlite + run migration
+│   ├── db_bootstrap.py         # Clone db.sqlite → db_enriched.sqlite + migrate
 │   ├── db_migrate_v11.py       # Idempotent v1.1 schema migration
-│   ├── backfill_phase1.py      # SMILES + UNII + MatchScore backfill
-│   ├── run_dedup.py            # UNII deduplication + substitution seeding
-│   ├── sources/                # API clients: pubchem.py, dsld.py, molport.py, fda_iid.py, openfda.py
+│   ├── backfill_phase1.py      # SMILES + UNII + MatchScore backfill (PubChem)
+│   ├── backfill_openfda.py     # Adverse event counts from openFDA
+│   ├── backfill_supplier_curated.py  # Curated bulk pricing (239/250 ingredients covered)
+│   ├── run_dedup.py            # UNII-based deduplication + substitution seeding
+│   ├── sources/                # pubchem.py, dsld.py, molport.py, fda_iid.py, openfda.py
 │   ├── normalizers/            # ingredient_normalizer.py, fuzzy_matcher.py
 │   ├── parsers/                # sku_parser.py
-│   └── enrichers/              # quantity_enricher.py, commercial_enricher.py, compliance_enricher.py, grade_classifier.py, role_classifier.py
+│   └── enrichers/              # quantity_enricher.py, commercial_enricher.py,
+│                               # compliance_enricher.py, grade_classifier.py,
+│                               # role_classifier.py, supplier_web_enricher.py
 │
-├── reasoning/                  # Stage 2 Phase 4 — scoring, compliance, and proposals
+├── reasoning/                  # Stage 2 Phase 4 — scoring and proposals
 │   ├── base.py                 # ToolResult, Tool ABC, compound_confidence()
-│   ├── role_inferrer.py        # RoleInferrer, ROLE_RULES, covers_roles()
-│   ├── compliance_reasoner.py  # 4-state ComplianceReasoner + JURISDICTION_PACKS (US-FDA, EU, CA, JP)
-│   ├── refusal_engine.py       # RefusalEngine, CONFIDENCE_FLOOR=0.50
-│   ├── consolidation_scorer.py # Formula-based opportunity scoring (129 rows)
-│   ├── substitution_graph.py   # Ingredient substitution edge builder (32 edges, rapidfuzz fallback)
-│   └── proposal_generator.py   # LLM proposal generation (ANTHROPIC_API_KEY set — needs running)
+│   ├── role_inferrer.py        # ROLE_RULES — maps ingredient names to functional roles
+│   ├── compliance_reasoner.py  # 4-state gate + JURISDICTION_PACKS (US-FDA, EU, CA, JP)
+│   ├── refusal_engine.py       # RefusalEngine — CONFIDENCE_FLOOR=0.50
+│   ├── consolidation_scorer.py # Formula scoring: 129 opportunities ranked
+│   ├── substitution_graph.py   # Substitution edges (32 edges, rapidfuzz fallback)
+│   └── proposal_generator.py   # Claude-based proposal generation (14 proposals written)
 │
-├── orchestration/              # Stage 3 — agent orchestration (LIVE)
+├── orchestration/              # Stage 3 — agent orchestration (live)
 │   ├── api/
-│   │   ├── main.py             # FastAPI app; start: uvicorn orchestration.api.main:app --reload --port 8000
-│   │   ├── dag_executor.py     # Topological layer executor with asyncio.gather + SSE publish
-│   │   ├── pipeline_loader.py  # YAML → Pipeline/PipelineNode dataclasses; 5 pipelines
-│   │   ├── conditions.py       # 6 named condition guards for YAML when: clauses
+│   │   ├── main.py             # FastAPI; uvicorn orchestration.api.main:app --port 8000
+│   │   ├── dag_executor.py     # Topological layer executor — asyncio.gather + SSE
+│   │   ├── pipeline_loader.py  # YAML → Pipeline/PipelineNode dataclasses
+│   │   ├── conditions.py       # 14 named condition guards for YAML when: clauses
 │   │   ├── db.py               # orchestration.db event log
-│   │   ├── event_bus.py        # SSE event bus
-│   │   ├── agent_registry.py   # Agent registration
-│   │   ├── agnes_context.py    # Shared context helpers
-│   │   └── routes/             # chat.py · pipelines.py · data.py · data_update.py · scoring.py
+│   │   ├── event_bus.py        # SSE publish/subscribe
+│   │   ├── agent_registry.py   # 14 tools + 8 agents registered
+│   │   ├── agnes_context.py    # Shared run context passed through every DAG node
+│   │   └── routes/             # chat · pipelines · data · data_update · scoring · alerts
 │   ├── agents/
-│   │   ├── router_agent.py     # Claude Haiku chat classifier → pipeline name + params
-│   │   ├── reactive_agent.py   # Supplier fallout → find alternatives
-│   │   ├── proactive_agent.py  # Consolidation opportunity runner
-│   │   ├── research_agent.py   # New supplier discovery
-│   │   ├── proposal_writer.py  # LLM proposal generation agent
-│   │   └── search_sub_agent.py # Google ADK / Gemini web search sub-agent
-│   ├── tools/                  # 8 deterministic tools (no LLM)
-│   │   ├── supplier_alternatives.py
-│   │   ├── compliance_gate.py      # legacy binary gate (still registered)
-│   │   ├── compliance_reasoner_tool.py  # 4-state gate: outcome/jurisdiction/above_floor
-│   │   ├── substitution_walker.py
-│   │   ├── bom_impact.py
-│   │   ├── price_benchmark.py
-│   │   ├── opportunity_ranker.py
-│   │   └── rfq_formatter.py
-│   ├── pipelines/              # YAML pipeline definitions
+│   │   ├── router_agent.py     # Gemini 2.5-flash compound-intent classifier
+│   │   ├── reactive_agent.py   # Supplier fallout → alternatives + proposal
+│   │   ├── proactive_agent.py  # Portfolio consolidation scan
+│   │   ├── research_agent.py   # New supplier discovery (web search)
+│   │   ├── proposal_writer.py  # Claude narrative proposal generation
+│   │   ├── price_fetch_agent.py        # Gemini web search → price updates
+│   │   ├── price_alert_writer.py       # Gemini → price alert narratives
+│   │   ├── regulatory_research_agent.py # FDA quarterly change log downloader
+│   │   ├── regulatory_drift_agent.py    # Drift narrative + DB flag writer
+│   │   └── search_sub_agent.py         # Google ADK web search sub-agent
+│   ├── tools/                  # 14 deterministic tools (no LLM calls)
+│   │   ├── supplier_alternatives.py    # 3-stage ingredient resolution + supplier lookup
+│   │   ├── compliance_reasoner_tool.py # 4-state compliance gate (persists to Refusal_Log)
+│   │   ├── substitution_walker.py      # Walk substitution graph from seed ingredient
+│   │   ├── bom_impact.py               # BOM exposure calculation for supplier change
+│   │   ├── price_benchmark.py          # Market price benchmarking
+│   │   ├── opportunity_ranker.py       # Score-ranked consolidation opportunity list
+│   │   ├── rfq_formatter.py            # RFQ drafts for top alternative suppliers
+│   │   ├── entity_verify.py            # GLEIF LEI lookup — supplier legal entity KYC
+│   │   ├── regulatory_drift_tool.py    # FDA IID quarterly drift detection + severity
+│   │   ├── price_staleness_checker.py  # Portfolio-wide stale price detection
+│   │   ├── no_data_explainer.py        # Graceful fallback when substitutes not found
+│   │   ├── no_opportunity_explainer.py # Graceful fallback when no opportunities found
+│   │   └── _ingredient_resolver.py     # Shared 3-stage resolver (exact→synonyms→fuzzy)
+│   ├── pipelines/              # 7 YAML pipeline definitions
 │   │   ├── supplier_fallout.yaml
 │   │   ├── proactive_consolidation.yaml
-│   │   ├── new_ingredient_research.yaml
 │   │   ├── substitution_discovery.yaml
-│   │   └── price_audit.yaml
-│   └── ui/                     # Stage 4 — Vite + React frontend (served at /ui)
+│   │   ├── new_ingredient_research.yaml
+│   │   ├── price_audit.yaml
+│   │   ├── price_monitor.yaml
+│   │   └── regulatory_drift_alert.yaml
+│   └── ui/                     # Stage 4 — React UI (served at / by FastAPI)
 │       ├── src/
-│       │   ├── App.tsx
-│       │   ├── components/     # VoiceOrb, DagPanel, NodeCard, DataExplorer, PipelineBadge, tabs/
-│       │   ├── hooks/          # useAgnesVoice.ts · useData.ts · useRunStream.ts
-│       │   ├── store/
-│       │   └── types/
-│       └── dist/               # Built output (served as static files by FastAPI)
+│       │   ├── components/     # VoiceOrb (ElevenLabs WebGL), DagGraphView, SuppliersView,
+│       │   │                   # ComplianceView, RegulatoryAlertsView, TradeRoutesView, ...
+│       │   ├── hooks/          # useAgnes, useAgnesVoice, usePriceAlerts, useRunStream, ...
+│       │   ├── store/          # agnesStore (Zustand) — run state, compound intent fan-out
+│       │   └── types/          # agnes.ts — full typed API surface
+│       └── dist/               # Built output served as SPA by FastAPI
 │
 ├── schema/
-│   └── enriched_schema.sql     # v1.1 — canonical schema definition
+│   └── enriched_schema.sql     # v1.1 — canonical schema definition (locked)
 │
-├── db.sqlite                   # READ-ONLY source of truth (Spherecast raw data)
-├── db_enriched.sqlite          # All Agnes enrichment output — writable
-├── orchestration.db            # Orchestration event log and run state
+├── db.sqlite                   # READ-ONLY source of truth (Spherecast raw data, immutable)
+├── db_enriched.sqlite          # All enrichment output — writable
+├── orchestration.db            # Agent run event log and SSE source
 ├── requirements.txt
-└── .env.template               # Copy to .env, fill in API keys
+└── .env.template               # Copy to .env; fill in API keys
 ```
 
-**Rule:** `db.sqlite` is never modified. All Agnes enrichment writes go to `db_enriched.sqlite`. Agent run state goes to `orchestration.db`.
+**Rule:** `db.sqlite` is never modified. All Agnes enrichment writes to `db_enriched.sqlite`. Agent run state goes to `orchestration.db`.
 
 ---
 
 ## Current Database State
 
-`db_enriched.sqlite` is at schema v1.1 with all enrichment phases run:
+`db_enriched.sqlite` at schema v1.1 with all enrichment phases complete:
 
 | Table | Rows | Notes |
 |---|---|---|
-| `Ingredient_Canonical` | 250 | 125 SMILES (50%), 135 UNII codes (54%), 239/250 Grade_Flag classified; 135 adverse_event_count backfilled |
-| `SKU_To_Canonical` | 854 | MatchScore backfilled |
+| `Ingredient_Canonical` | 250 | 125 SMILES (50%), 135 UNII codes (54%), 239/250 Grade_Flag classified, 135 adverse event counts, 177 Function roles populated |
+| `SKU_To_Canonical` | 854 | MatchScore backfilled; ≥700 resolved at confidence ≥0.65 |
 | `BOM_Component_Quantity` | 515 | 87/149 finished goods (58% coverage) |
-| `Product_Compliance` | 126 | 66 products, 9 cert types |
-| `Supplier_Commercial` | 0 | Stub ready — no-ops without MOLPORT_API_KEY |
-| `Consolidation_Opportunity` | 123 | Scored; top: Vitamin C (25 cos, score=0.893); Proposal_Text empty (needs ANTHROPIC_API_KEY) |
-| `Ingredient_Substitution` | 32 edges | Fuzzy fallback added to graph builder; 18 rules still unresolved |
-| `FDA_Inactive_Ingredient` | 9,067 | From IIR_OCOMM.csv; 1,150 rows matched to canonical ingredients by UNII |
+| `Product_Compliance` | 126 | 66 products, 9 cert types (NSF, USP, Informed-Sport, ...) |
+| `Supplier_Commercial` | 239 | 95.6% ingredient coverage; curated pricing + web-enriched |
+| `Consolidation_Opportunity` | 129 | Scored; top: Vitamin C (25 cos, score=0.893); 14 proposals written |
+| `Claim_Citation` | 112 | Citations extracted from proposals (Claude Haiku) |
+| `Refusal_Log` | 4+ | Demo trap refusals seeded; live refusals appended per run |
+| `Ingredient_Substitution` | 32 edges | Fuzzy fallback in graph builder; 18 rules still unresolved |
+| `Ingredient_Substitution_Rule` | 38 | Raw rules; 20 aliases resolved via fix_substitution_rules.py |
+| `FDA_Inactive_Ingredient` | 9,067 | From IIR_OCOMM.csv; 1,150 matched to canonicals by UNII |
+| `FDA_IID_Change_Log` | 187 | Quarterly change log; 27 matched canonicals; 4 HIGH-severity drift flags |
+| `Price_Change_Alert` | — | Written by price_fetch_agent when ≥15% price change detected |
+| `Supplier_Master` | — | GLEIF LEI cache (30-day TTL); populated by entity_verify tool |
 | `Scoring_Config` | 3 | Default weights: price=3.0, lead_time=3.0, quality=3.0 |
-
-**What's blocked / what to build next:**
-
-1. **Proposals** — `ANTHROPIC_API_KEY` is set; run `PYTHONPATH=. python3 reasoning/proposal_generator.py` to populate `Proposal_Text` for top-50 consolidation candidates.
-2. **Supplier commercial data** — `MOLPORT_API_KEY` is blank; register at molport.com or seed proxy prices manually for top-10 ingredients.
-3. **Voice UI** — ElevenLabs key is set (`ELEVENLABS_API_KEY`); `useAgnesVoice.ts` + `VoiceOrb.tsx` scaffold exists; test end-to-end with `pnpm dev`.
 
 ---
 
 ## Tech Stack
 
 ### Data Layer
-- **SQLite** (`db_enriched.sqlite`) — all persistent enrichment data, all API cache
-- **SQLite** (`orchestration.db`) — agent run state, event log, SSE source
-- **Schema** defined in `schema/enriched_schema.sql` (v1.1, locked)
-- Every field Agnes writes carries `source` (string) and `confidence` (float 0–1)
+- **SQLite** (`db_enriched.sqlite`) — all persistent enrichment data, all API response cache
+- **SQLite** (`orchestration.db`) — agent run event log, SSE source of truth
+- **Schema** in `schema/enriched_schema.sql` (v1.1, locked)
+- Every Agnes-written field carries `source` (string) and `confidence` (float 0–1)
 
 ### Enrichment Pipeline (Stage 2 — Python)
-- `enrichment/pipeline.py --phase 1|2|3` runs each phase idempotently
-- Sources: PubChem (no key), DSLD (key required), Molport (key optional), USDA FDC (key optional)
-- Normalizers: RapidFuzz for fuzzy ingredient matching, `sentence-transformers` for semantic fallback
-- Browser: Playwright + BeautifulSoup for retailer supplement facts pages
+- `enrichment/pipeline.py --phase 1|2|3` — idempotent; safe to re-run; cache hit rate ≥90% on second run
+- **Phase 1 — Ingredient Identity:** PubChem PUG REST (CAS, SMILES, UNII), DSLD v9, USDA FDC; RapidFuzz + sentence-transformers for name normalization; UNII-based deduplication with CAS-differs guard
+- **Phase 2 — BOM Quantities:** DSLD BOM amounts; fingerprint matching (brand+ingredient query, ≥2 overlap)
+- **Phase 3 — Commercial & Compliance:** Molport v3 supplier catalogue (stub + 1.65 GB local SMILES index); compliance enricher (9 cert types); openFDA adverse event counts
+- **Phase 4 — Scoring & Proposals:** Formula-based consolidation scoring (129 rows); substitution graph with rapidfuzz fallback; Claude-based proposal generation (top-50 candidates)
 
-### Orchestration API (Stage 3 — FastAPI)
-- **FastAPI** (`orchestration/api/main.py`) — 8 REST + SSE endpoints
-- **YAML pipelines** (`orchestration/pipelines/`) — 5 pipelines; `pipeline_loader.py` parses into DAG dataclasses
-- **DAG executor** (`orchestration/api/dag_executor.py`) — topological layers, `asyncio.gather()`, per-step event log, SSE publish
-- **Deterministic tools** (`orchestration/tools/`) — 8 tools (no LLM calls); compose into pipeline DAG nodes; `compliance_reasoner_tool` replaces binary `compliance_gate` in `supplier_fallout` and `substitution_discovery` pipelines
-- **AI agents** (`orchestration/agents/`) — Claude-based reasoning (router, reactive, proactive, research, proposal writer); Google ADK / Gemini for web search
+### Orchestration Engine (Stage 3 — FastAPI)
+- **FastAPI** with CORS + SPA fallback; background `price_monitor` scheduler (every 24h)
+- **YAML pipelines** — 7 declarative pipeline definitions; `pipeline_loader.py` parses into typed dataclasses
+- **DAG executor** — Kahn's topological sort, `asyncio.gather()` parallelism within layers, per-node event logging, SSE publish on every state change
+- **14 deterministic tools** — no LLM calls; compose into pipeline nodes; results are structured, typed dicts
+- **8 AI agents** — Claude (Anthropic API) for reasoning/proposals; Gemini 2.5-flash (Google ADK) for routing, web search, and price/regulatory narratives
 
-#### API Endpoints
+### Reasoning Cross-References
+Agnes agents cross-reference multiple enrichment layers before reaching a conclusion:
+
+| Decision | Cross-references |
+|---|---|
+| Supplier switch recommendation | `Supplier_Commercial` (price/lead) + `Product_Compliance` (certs) + `BOM_Component_Quantity` (exposure) + `Supplier_Master` (GLEIF legal entity) |
+| Substitution proposal | `Ingredient_Substitution` graph + `Ingredient_Canonical` (SMILES/grade) + `FDA_Inactive_Ingredient` (max daily dose/routes) + compliance gate |
+| Consolidation opportunity | `Consolidation_Opportunity` (formula score) + `SKU_To_Canonical` (company spread) + `Ingredient_Canonical` (function/grade) + `Scoring_Config` (weights) |
+| Regulatory drift alert | `FDA_IID_Change_Log` (before/after MDE) + `Ingredient_Canonical` (UNII match) + `Consolidation_Opportunity` (flags affected rows) |
+| Refusal | `Refusal_Log` (prior decisions) + `compliance_reasoner` (jurisdiction pack) + `RefusalEngine` (CONFIDENCE_FLOOR=0.50) |
+
+### Compliance Reasoning (4-state gate)
+`compliance_reasoner_tool.py` implements jurisdiction-aware compliance evaluation:
+
+```
+pass-global         — no restrictions across all jurisdictions
+fork-recommended    — compliant in primary, restrictions elsewhere; propose jurisdiction split
+human-review        — confidence below floor or conflicting signals; escalate
+refuse              — ingredient banned or exceeds FDA IID max daily dose; log to Refusal_Log
+```
+
+Jurisdiction packs: US-FDA, EU, CA (Canada), JP (Japan). Results persisted to `Refusal_Log` so repeat queries are consistent.
+
+### API Endpoints (17 total)
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/chat` | Natural language → router agent → pipeline trigger |
-| POST | `/pipelines/run/{name}` | Direct pipeline trigger with params |
-| GET | `/pipelines` | List all loaded pipeline definitions |
+| POST | `/chat` | Natural language → router → pipeline trigger; returns `secondary_runs[]` for compound intents |
 | GET | `/runs` | List recent agent run records |
-| GET | `/runs/{id}` | Single run detail |
-| GET | `/runs/{id}/stream` | SSE stream for live run events |
-| GET | `/proposals` | Consolidation proposals from DB |
-| POST | `/data-update` | Trigger data refresh |
+| GET | `/runs/{id}` | Single run detail with node outputs |
+| GET | `/runs/{id}/stream` | SSE stream — live `node_started/completed/skipped/failed` events |
+| POST | `/pipelines/run/{name}` | Direct pipeline trigger with params JSON |
+| GET | `/pipelines` | List all loaded pipeline definitions |
+| GET | `/api/data/opportunities` | Scored consolidation opportunities |
+| GET | `/api/data/ingredients` | Canonical ingredient list with enrichment fields |
+| GET | `/api/data/suppliers` | Supplier commercial data with provenance + GLEIF fields |
+| GET | `/api/data/compliance` | Product compliance records |
+| GET | `/api/data/proposals` | Written consolidation proposals |
+| GET | `/api/data/proposals/{id}/citations` | Citations for a specific proposal |
+| GET | `/api/data/refusals` | Refusal log entries |
 | GET | `/api/data/regulatory-alerts` | FDA IID quarterly drift alerts grouped by ChangeId |
-| GET | `/ui` | Serve React frontend (from `orchestration/ui/dist/` if built) |
+| GET | `/api/alerts/count` | Price alert count (polled by UI every 60s) |
+| POST | `/api/data-update` | Trigger proactive_consolidation pipeline |
 | GET | `/health` | Health check |
+| GET | `/api/scoring/weights` | Current scoring dimension weights |
+| POST | `/api/scoring/weights` | Update scoring weights |
+| GET | `/api/scoring/suppliers/{id}` | Scored supplier ranking for an ingredient |
 
-### Frontend (Stage 4 — Vite + React)
-- Located at `orchestration/ui/`; served at `/ui` by the FastAPI app
-- Components: `VoiceOrb`, `DagPanel`, `NodeCard`, `DataExplorer`, `PipelineBadge`
-- Hooks: `useAgnesVoice` (ElevenLabs voice), `useData` (REST), `useRunStream` (SSE)
-- Build: `cd orchestration/ui && pnpm build` → outputs to `dist/`, auto-served by FastAPI
-
-### Reasoning Layer (Stage 2 Phase 4)
-- **Formula scoring** — `consolidation_scorer.py`: `company×0.40 + bom×0.25 + fragmentation×0.20 + supplier_spread×0.15`
-- **LLM adjustment** — `proposal_generator.py`: Claude adjusts top-50 scores ±0.10, writes `Proposal_Text` (ready to run)
-- **Substitution graph** — `substitution_graph.py`: 32 equivalence edges; rapidfuzz fuzzy fallback for rule name resolution
-- **4-state compliance** — `compliance_reasoner.py` + `refusal_engine.py`: jurisdiction-aware (US-FDA, EU, CA, JP); outcomes: pass-global / fork-recommended / human-review / refuse
-- **Role inference** — `role_inferrer.py`: maps ingredient names to functional roles (lubricant, mineral-fortificant, etc.); `Function` column fully populated
+### Frontend (Stage 4 — React + ElevenLabs)
+- Located at `orchestration/ui/` (git subtree from `timbtz/agnes-ai-navigator`); served as SPA at `/`
+- Built with Vite + React + TypeScript + Tailwind; state via Zustand
+- **Voice:** ElevenLabs WebGL orb component; WebGL failure renders CSS gradient fallback; STT → `/chat` → SSE → TTS pipeline
+- **Views:** Suppliers (7-col grid with Trust column: GLEIF vetted stamp, provenance badge, URL health, corroboration score), Compliance (search + filter + cert derivation tooltip), Regulatory Alerts (severity-filtered with before/after MDE snapshot), Trade Routes (lane table with mode icons + Landed Cost Index), DAG canvas (live node execution with collapsible output panels)
+- **Compound intent:** `useAgnes` subscribes to each SSE stream in `secondary_runs[]`; store tracks fan-out runs; UI shows `+N more` pill when parallel pipelines are active
+- Build: `cd orchestration/ui && bun run build`; update from Lovable: `./pull-ui.sh`
 
 ---
 
 ## APIs
 
-All keys go in `.env` (copy from `.env.template`):
+All keys in `.env` (copy from `.env.template`):
 
-| API | Key Required | What It Does | Where to Get Key | Rate Limit |
-|---|---|---|---|---|
-| **Anthropic Claude** | Yes | Stage 3 routing/reasoning + Stage 4 proposals | console.anthropic.com | Per-token |
-| **Google ADK / Gemini** | Yes | Web search in research agent | aistudio.google.com (free) | Free tier |
-| **NIH DSLD v9** | Yes | Ingredient UNII codes + BOM amounts | dsld.od.nih.gov/api-guide | Undocumented |
-| **PubChem PUG REST** | No | CAS numbers, SMILES, canonical names | — | 5 req/sec, 400/min |
-| **Molport v3** | No (stub) | Chemical supplier pricing | molport.com | 10k req/month |
-| **USDA FoodData Central** | No (key for higher limits) | Food-grade ingredient lookup | fdc.nal.usda.gov | 1000/hr |
-| **openFDA** | No (key for higher limits) | Drug/supplement adverse events | open.fda.gov | 40/min anon |
-| **RxNorm** | No | Drug-class ingredient IDs | — | Undocumented |
+| API | Key Required | What It Does | Rate Limit |
+|---|---|---|---|
+| **Anthropic Claude** | Yes | Agent reasoning, proposal generation, compliance analysis | Per-token |
+| **Google ADK / Gemini** | Yes | Intent routing (2.5-flash), web search, price/regulatory narratives | Free tier |
+| **NIH DSLD v9** | Yes | Ingredient UNII codes + BOM amounts | Undocumented |
+| **PubChem PUG REST** | No | CAS numbers, SMILES, canonical names, UNII synonyms | 5 req/sec, 400/min |
+| **openFDA** | No | Adverse event counts, drug/supplement label search | 40/min anon |
+| **GLEIF LEI API** | No | Supplier legal entity verification (30-day cache) | Free, undocumented |
+| **Molport v3** | No (stub) | Chemical supplier catalogue + pricing | 10k req/month |
+| **USDA FoodData Central** | No | Food-grade ingredient lookup (5 food macros) | 1000/hr |
+| **RxNorm** | No | Drug-class ingredient IDs (deferred — narrow dataset coverage) | Undocumented |
 
-Integration guides for each API are in `Orchestration/References/`.
-
-**Cost note:** PubChem, DSLD, USDA FDC, RxNorm, openFDA are free. Molport free tier only. Claude API costs are limited to routing + proposal generation for top-50 consolidation candidates.
+All API responses are cached in `db_enriched.sqlite`. No external call is made if a cached result is present.
 
 ---
 
@@ -228,22 +311,24 @@ Integration guides for each API are in `Orchestration/References/`.
 git clone <repo>
 cd "Spherecast Agnes"
 pip install -r requirements.txt
-playwright install chromium          # for browser agent
 
 cp .env.template .env
 # Fill in ANTHROPIC_API_KEY, GOOGLE_API_KEY, DSLD_API_KEY at minimum
 ```
 
-### Run the enrichment pipeline (already done — safe to re-run idempotently)
+### Run the enrichment pipeline
+
+All phases are already run against the included `db_enriched.sqlite`. Re-running is idempotent:
 
 ```bash
-python enrichment/db_bootstrap.py    # Creates db_enriched.sqlite if missing
+python enrichment/db_bootstrap.py    # creates db_enriched.sqlite if missing
 python enrichment/pipeline.py --phase 1
 python enrichment/backfill_phase1.py
 python enrichment/run_dedup.py
 python enrichment/pipeline.py --phase 2
 python enrichment/pipeline.py --phase 3
 python reasoning/consolidation_scorer.py
+python reasoning/proposal_generator.py  # generates Proposal_Text for top-50 candidates
 ```
 
 ### Start the orchestration API
@@ -252,21 +337,22 @@ python reasoning/consolidation_scorer.py
 PYTHONPATH=. uvicorn orchestration.api.main:app --reload --port 8000
 ```
 
-The FastAPI server starts at `http://localhost:8000`. Swagger docs at `http://localhost:8000/docs`.  
-The React UI is served at `http://localhost:8000/ui` (from `orchestration/ui/dist/` if built, otherwise `orchestration/ui/`).
+FastAPI at `http://localhost:8000`. Swagger docs at `/docs`. React UI at `/`.
 
-### Build the UI (optional — for production-like serving)
+### Build the UI
 
 ```bash
 cd orchestration/ui
-pnpm install
-pnpm build
+bun install
+bun run build
 ```
 
-### Validate current state
+To pull the latest Lovable build: `./pull-ui.sh`
+
+### Validate enrichment state
 
 ```sql
--- Open db_enriched.sqlite with any SQLite client and run:
+-- Open db_enriched.sqlite in any SQLite client:
 
 SELECT COUNT(*) AS total, SUM(CASE WHEN Confidence >= 0.65 THEN 1 END) AS resolved
 FROM SKU_To_Canonical;
@@ -276,125 +362,142 @@ SELECT COUNT(*) FROM BOM_Component_Quantity WHERE Confidence >= 0.65;
 -- Expected: 515
 
 SELECT COUNT(DISTINCT CanonicalIngredientId) FROM Supplier_Commercial;
--- Phase 3 commercial enrichment (0 without MOLPORT_API_KEY)
+-- Expected: 239
 
-SELECT COUNT(*) FROM Consolidation_Opportunity WHERE Score IS NOT NULL;
--- Expected: 123
+SELECT Name, Company_Count, Score FROM Consolidation_Opportunity
+ORDER BY Score DESC LIMIT 5;
+-- Expected: Vitamin C at top (25 companies, score=0.893)
 ```
 
 ---
 
-## How Agnes Orchestrates Agents
+## How Agnes Reasons
 
-The key design principle: **agents must be auditable, not free-form**. For every high-stakes decision (supplier switch, consolidation proposal), the reasoning is:
+The key design principle: **decisions must be auditable, not free-form.** For every recommendation:
 
-1. **Anchored** to live data in `db_enriched.sqlite` — no stale pages
-2. **Structured** as a YAML-defined DAG of steps with logged inputs/outputs
-3. **Persistent** — conclusions are written back to the DB so the next agent run starts richer
+1. **Anchored** to live enriched data in `db_enriched.sqlite` — no stale context
+2. **Structured** as a YAML-defined DAG of steps with logged inputs and outputs
+3. **Cross-referenced** — tools pull from multiple enrichment layers before passing context to agents
+4. **Persistent** — conclusions write back to the DB so the next agent run starts richer
 
-### Pipeline Architecture
-
-Each pipeline in `orchestration/pipelines/*.yaml` defines a directed acyclic graph of nodes. `pipeline_loader.py` deserializes these into `Pipeline`/`PipelineNode` dataclasses. `dag_executor.py` runs them in topological layers using `asyncio.gather()` for parallelism within a layer.
-
-Each DAG node maps to either a **deterministic tool** (`orchestration/tools/`) or an **AI agent** (`orchestration/agents/`). Every node execution is logged to `orchestration.db` and streamed via SSE at `/runs/{id}/stream`.
-
-### Example: Supplier Fallout Pipeline
+### Pipeline Execution Example: Supplier Fallout
 
 ```yaml
 # orchestration/pipelines/supplier_fallout.yaml (simplified)
 nodes:
   - id: find-alternatives
-    tool_class: SupplierAlternativesTool
+    tool_class: SupplierAlternativesTool     # 3-stage name resolution → DB lookup
+  - id: web-research
+    agent_class: ResearchAgent              # Gemini web search for recent supplier news
+    depends_on: [find-alternatives]
+    when: has_alternatives
+  - id: verify-entity
+    tool_class: EntityVerifyTool            # GLEIF LEI lookup → vetted/legal_name
+    depends_on: [find-alternatives]
+    when: has_alternatives
   - id: gate-compliance
-    tool_class: ComplianceReasonerTool   # 4-state: pass-global|fork-recommended|human-review|refuse
+    tool_class: ComplianceReasonerTool      # 4-state: pass-global|fork|human-review|refuse
     depends_on: [find-alternatives]
     when: has_alternatives
   - id: bom-impact
-    tool_class: BomImpactTool
+    tool_class: BomImpactTool               # BOM exposure across all affected products
     depends_on: [find-alternatives]
   - id: format-rfqs
-    tool_class: RfqFormatterTool
+    tool_class: RfqFormatterTool            # Draft RFQs for top 3 alternatives
     depends_on: [gate-compliance, bom-impact]
     when: compliance_reasoner_feasible
   - id: write-proposal
-    agent_class: ReactiveAgent
-    depends_on: [format-rfqs, bom-impact]
+    agent_class: ReactiveAgent              # Claude narrative: context → recommendation
+    depends_on: [format-rfqs, verify-entity, bom-impact]
 ```
 
-### SQLite Reasoning Pattern
+`find-alternatives`, `verify-entity`, `gate-compliance`, and `bom-impact` run in parallel (same topological layer). The proposal writer receives all their outputs merged into `AgnesContext.node_outputs`.
 
-`db_enriched.sqlite` is the persistent reasoning layer. Before an agent reasons about a decision, it queries the DB for live context. After making a decision, it writes results back into existing tables and logs the run.
+### Compound Intent Routing
 
-**Context query example (Vitamin C opportunity):**
-```sql
-SELECT ic.Name, ic.SMILES, ic.Grade_Flag, ic.UNII_Code,
-       co.Consolidation_Score, co.Company_Count, co.Proposal_Text,
-       GROUP_CONCAT(pc.Certification) AS Certs
-FROM Ingredient_Canonical ic
-JOIN Consolidation_Opportunity co ON co.CanonicalIngredientId = ic.Id
-LEFT JOIN Product_Compliance pc ON pc.ProductId IN (
-    SELECT s.ProductId FROM SKU_To_Canonical s WHERE s.CanonicalId = ic.Id
-)
-WHERE ic.Name = 'Vitamin C'
-GROUP BY ic.Id;
+The router agent handles multi-intent queries:
+
+> *"Our Magnesium supplier fell through AND I want to check if we're overpaying on Vitamin D3"*
+
+Returns:
+```json
+{
+  "pipeline": "supplier_fallout",
+  "params": {"ingredient_name": "Magnesium"},
+  "secondary_intents": [
+    {"pipeline": "price_audit", "params": {"ingredient_name": "Vitamin D3"}}
+  ]
+}
 ```
 
----
+The `/chat` endpoint fans out to parallel pipeline executions. The UI subscribes to each SSE stream independently.
 
-## Contribution Guidelines
+### Ingredient Resolution (3-stage)
 
-### Who owns what
+`_ingredient_resolver.py` is the shared utility used by `supplier_alternatives` and `substitution_walker`:
 
-| Area | Owner | Notes |
-|---|---|---|
-| Pipeline (Stage 2) | timbtz | Phases 1–3 complete; Phase 4 proposals blocked on ANTHROPIC_API_KEY |
-| Supply chain scoring model | Supply chain expert | Formula weights open for revision — see `reasoning/consolidation_scorer.py` |
-| Orchestration API (Stage 3) | timbtz | Live at port 8000; 5 pipelines, 8 endpoints |
-| Voice UI (Stage 4) | Open | VoiceOrb + useAgnesVoice scaffold exists; ElevenLabs integration guide written |
+1. **Exact match** — direct `Name` or `CAS_Number` lookup in `Ingredient_Canonical`
+2. **Synonym table** — 80+ curated aliases (`"vitamin d3"` → `"Cholecalciferol"`, `"MCC"` → `"Microcrystalline Cellulose"`)
+3. **Fuzzy match** — RapidFuzz `token_set_ratio ≥ 85` across all canonical names
 
-### Supply chain expert: what you can change
-
-The quality/compliance scoring dimensions (`reasoning/consolidation_scorer.py`) were defined with limited domain input. The current formula:
-
-```
-score = company×0.40 + bom×0.25 + fragmentation×0.20 + supplier_spread×0.15
-```
-
-The weights and dimensions are open for revision. The schema has `Score_Formula_Component` and `Score_LLM_Adjustment` columns ready for a hybrid approach.
-
-### Adding a new pipeline
-
-1. Add `orchestration/pipelines/<name>.yaml` — define nodes, tools, and `when:` conditions
-2. Available tools: `supplier_alternatives`, `compliance_gate`, `compliance_reasoner_tool`, `substitution_walker`, `bom_impact`, `price_benchmark`, `opportunity_ranker`, `rfq_formatter`
-3. Available conditions: see `orchestration/api/conditions.py` (7 named guards incl. `compliance_reasoner_feasible`)
-4. Test via `POST /pipelines/run/<name>` with params JSON
-5. Update the pipeline list in the CLAUDE.md Orchestration Layer table
-
-### Adding a new API or data source
-
-1. Add the client to `enrichment/sources/<api_name>.py`
-2. Add a guide to `Orchestration/References/<api_name>-integration-guide.md`
-3. Wire it into the appropriate enricher in `enrichment/enrichers/`
-4. Add the key to `.env.template` and update the API table above
-5. Update `CLAUDE.md` Current State table and this README's DB State table
-
----
-
-## Key Files to Read First
-
-1. [`Orchestration/PRDs/meta-workflow.md`](Orchestration/PRDs/meta-workflow.md) — four-stage implementation plan, agent architecture, open decisions
-2. [`CLAUDE.md`](CLAUDE.md) — live current state: what's run, what's broken, what's blocked
-3. [`schema/enriched_schema.sql`](schema/enriched_schema.sql) — locked v1.1 schema; understand this before writing any SQL
-4. [`Orchestration/References/Tech/Orchestration/REF-ELEVENLABS-VOICE-PIPELINE-INTEGRATION.md`](Orchestration/References/Tech/Orchestration/REF-ELEVENLABS-VOICE-PIPELINE-INTEGRATION.md) — full voice pipeline integration guide (STT → /chat → SSE → TTS)
-5. [`Orchestration/References/Tech/Orchestration/REF-YAML-PIPELINE-SCHEMA.md`](Orchestration/References/Tech/Orchestration/REF-YAML-PIPELINE-SCHEMA.md) — YAML pipeline node schema reference
+Without this, partial names and trade names would fail silently. With it, user queries like `"vit c"` or `"mag stearate"` resolve correctly.
 
 ---
 
 ## Design Principles
 
 - **Evidence everywhere.** Every Agnes-written field has `source` and `confidence`. No silent failures.
-- **Idempotent always.** Every pipeline run and agent execution is safe to repeat. `INSERT OR REPLACE` or `ON CONFLICT DO UPDATE` everywhere.
+- **Idempotent always.** Every pipeline and enrichment script is safe to re-run. `INSERT OR REPLACE` / `ON CONFLICT DO UPDATE` throughout.
 - **Cache first.** All external API responses are cached in `db_enriched.sqlite`. Never re-fetch what's stored.
-- **No paid services.** Free tiers only. No Apify, no ChemAnalyst, no ImportGenius.
+- **Free services where possible.** PubChem, DSLD, USDA FDC, RxNorm, openFDA, GLEIF are all free. Molport free tier only. Claude API costs limited to proposal generation for top-50 candidates.
 - **Auditable reasoning.** Every agent decision is traceable to its DAG steps in `orchestration.db`. The user can always ask "why did Agnes recommend this?"
-- **Pricing disclaimer.** Molport pricing is research/lab scale. Always include in proposals: *"pricing indicative at research quantities — production volume requires direct negotiation."*
+- **Graceful degradation.** Every pipeline has fallback nodes (`no_data_explainer`, `no_opportunity_explainer`) for empty results. GLEIF lookups cache for 30 days. Molport stub no-ops cleanly when key is absent.
+- **Pricing disclaimer.** Molport and web-sourced pricing is at research/lab scale. Agnes always includes in proposals: *"pricing indicative at research quantities — production volume requires direct negotiation."*
+
+---
+
+## Contributing
+
+### Who owns what
+
+| Area | Owner | Notes |
+|---|---|---|
+| Enrichment pipeline (Stage 2) | timbtz | All phases complete; idempotent re-run safe |
+| Scoring model weights | Supply chain expert | Formula open for revision — `reasoning/consolidation_scorer.py` |
+| Orchestration API (Stage 3) | timbtz | 7 pipelines, 17 endpoints live |
+| Voice + Chat UI (Stage 4) | timbtz | Lovable-managed; sync via `./pull-ui.sh` |
+
+### Scoring formula
+
+```
+score = company×0.40 + bom×0.25 + fragmentation×0.20 + supplier_spread×0.15
+```
+
+Weights are open for revision. `Scoring_Config` table and `/api/scoring/weights` endpoint support runtime weight updates without code changes. `Score_LLM_Adjustment` column (±0.10) is written by `proposal_generator.py` for the top-50 candidates.
+
+### Adding a new pipeline
+
+1. Add `orchestration/pipelines/<name>.yaml` — declare nodes, tools, `when:` conditions
+2. Available tools: see `orchestration/tools/` (14 total)
+3. Available conditions: see `orchestration/api/conditions.py` (14 named guards)
+4. Test via `POST /pipelines/run/<name>` with params JSON
+5. Register the pipeline name in `router_agent.py` `_VALID_PIPELINES` and `_SYSTEM` prompt
+6. Update CLAUDE.md
+
+### Adding a new data source
+
+1. Add client to `enrichment/sources/<name>.py`
+2. Add integration guide to `Orchestration/References/<name>-integration-guide.md`
+3. Wire into enricher in `enrichment/enrichers/`
+4. Add key to `.env.template`
+5. Update the API table above and CLAUDE.md
+
+---
+
+## Key Files to Read First
+
+1. [`Orchestration/PRDs/meta-workflow.md`](Orchestration/PRDs/meta-workflow.md) — four-stage plan, agent architecture, open decisions
+2. [`CLAUDE.md`](CLAUDE.md) — live current state: every component, every known limit
+3. [`schema/enriched_schema.sql`](schema/enriched_schema.sql) — v1.1 locked schema; read before writing any SQL
+4. [`Orchestration/References/Tech/Orchestration/REF-YAML-PIPELINE-SCHEMA.md`](Orchestration/References/Tech/Orchestration/REF-YAML-PIPELINE-SCHEMA.md) — pipeline node schema reference
+5. [`Orchestration/References/Tech/Orchestration/REF-ELEVENLABS-VOICE-PIPELINE-INTEGRATION.md`](Orchestration/References/Tech/Orchestration/REF-ELEVENLABS-VOICE-PIPELINE-INTEGRATION.md) — full voice pipeline: STT → /chat → SSE → TTS

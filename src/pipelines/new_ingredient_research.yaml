@@ -1,0 +1,26 @@
+name: new_ingredient_research
+trigger: chat
+# US-03: Research suppliers for a new or unknown ingredient via web search.
+# Stages discovered suppliers, verifies legal entities, qualifies them, produces a summary.
+nodes:
+  - id: web-research
+    agent_class: ResearchAgent
+    depends_on: []
+
+  - id: find-alternatives
+    tool_class: SupplierAlternativesTool
+    depends_on: [web-research]
+
+  - id: verify-entity
+    tool_class: EntityVerifyTool
+    depends_on: [find-alternatives, web-research]
+    when: has_research_results
+
+  - id: gate-qualify
+    tool_class: ComplianceGateTool
+    depends_on: [find-alternatives, web-research]
+    when: has_research_results
+
+  - id: write-proposal
+    agent_class: ProposalWriter
+    depends_on: [gate-qualify, web-research, verify-entity]

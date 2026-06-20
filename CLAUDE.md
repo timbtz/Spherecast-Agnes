@@ -26,7 +26,7 @@
 | Component | Status | Notes |
 |---|---|---|
 | `orchestration/api/main.py` | ✅ Live | FastAPI; start: `PYTHONPATH=. uvicorn orchestration.api.main:app --reload --port 8000` |
-| `orchestration/api/dag_executor.py` | ✅ Complete | Topological layers, asyncio.gather(), `orchestration.db` event log, SSE publish |
+| `orchestration/api/dag_executor.py` | ✅ Complete | Topological layers, asyncio.wait(FIRST_COMPLETED) + per-node timeouts (60s tool/300s agent) + cancel siblings on first failure; `orchestration.db` event log |
 | `orchestration/api/pipeline_loader.py` | ✅ Complete | YAML → Pipeline/PipelineNode dataclasses; 7 pipelines loaded |
 | `orchestration/api/conditions.py` | ✅ Complete | 14 condition guards; +3 negative conditions: `no_substitutes_found`, `no_price_data_found`, `no_opportunities_found` |
 | `orchestration/agents/router_agent.py` | ✅ Updated | Gemini compound-intent classifier; `secondary_intents[]` support; prefilter for hostile markers; confidence floor 0.2 |

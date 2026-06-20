@@ -1,0 +1,180 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useAgnesStore, extractSpokenResponse } from "@/store/agnesStore";
+import { agnesApi } from "@/lib/agnesApi";
+import { isElevenLabsConfigured, speakWithElevenLabs } from "@/lib/elevenlabs";
+import {
+  isSpeechRecognitionSupported,
+  startMicLevelMonitor,
+  startSpeech,
+} from "@/lib/speech";
+import type { RunEvent, SecondaryRun } from "@/types/agnes";
+
+// useAgnes — orchestrates: Web Speech (STT) → /chat → SSE stream → ElevenLabs TTS
+export function useAgnes() {
+  const {
+    setOrbState,
+    setInputLevel,
+    setOutputLevel,
+    setTranscript,
+    setLastResponse,
+    startRun,
+    addSecondaryRun,
+    applyEvent,
+    setGraph,
+    activeRunId,
+  } = useAgnesStore();
+
+  const [isActive, setIsActive] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const cleanupRef = useRef<Array<() => void>>([]);
+  const eventsRef = useRef<RunEvent[]>([]);
+
+  const cleanupAll = useCallback(() => {
+    cleanupRef.current.forEach((fn) => { try { fn(); } catch { /* noop */ } });
+    cleanupRef.current = [];
+  }, []);
+
+  // Speak a text snippet through ElevenLabs.
+  const speak = useCallback(
+    async (text: string) => {
+      setLastResponse(text);
+      if (!isElevenLabsConfigured()) {
+        setOrbState("idle");
+        return;
+      }
+      setOrbState("talking");
+      const session = await speakWithElevenLabs(
+        text,
+        (lvl) => setOutputLevel(lvl),
+        (s, msg) => {
+          if (s === "error") {
+            setError(msg ?? "TTS error");
+            setOrbState("error");
+            window.setTimeout(() => setOrbState("idle"), 1500);
+          }
+          if (s === "done") {
+            setOutputLevel(0);
+            setOrbState("idle");
+          }
+        },
+      );
+      if (session) {
+        cleanupRef.current.push(session.stop);
+        await session.done;
+      }
+    },
+    [setLastResponse, setOrbState, setOutputLevel],
+  );
+
+  const subscribeSecondary = useCallback(
+    (runs: SecondaryRun[]) => {
+      for (const sec of runs) {
+        addSecondaryRun(sec.run_id);
+        const close = agnesApi.streamRun(
+          sec.run_id,
+          () => { /* secondary events not shown in primary DAG */ },
+          () => { /* stream closed */ },
+        );
+        cleanupRef.current.push(close);
+      }
+    },
+    [addSecondaryRun],
+  );
+
+  const handleTranscript = useCallback(
+    async (text: string) => {
+      setTranscript(text);
+      setOrbState("thinking");
+      try {
+        const resp = await agnesApi.chat(text);
+
+        if (resp.status === "no_match" || !resp.run_id || !resp.pipeline) {
+          void speak("I wasn't sure which workflow to run. Could you rephrase your request?");
+          return;
+        }
+
+        let graph = null;
+        try { graph = await agnesApi.pipelineGraph(resp.pipeline); } catch { /* noop */ }
+        startRun(resp.run_id, resp.pipeline, graph);
+        eventsRef.current = [];
+
+        // Fan out secondary pipelines (compound intents) — subscribe but don't display their DAGs.
+        if (resp.secondary_runs?.length) {
+          subscribeSecondary(resp.secondary_runs);
+        }
+
+        const closeStream = agnesApi.streamRun(
+          resp.run_id,
+          (ev) => {
+            eventsRef.current.push(ev);
+            applyEvent(ev);
+            if (ev.event_type === "pipeline_completed" || ev.event_type === "pipeline_failed") {
+              const spoken = extractSpokenResponse(eventsRef.current)
+                ?? "Agnes finished the pipeline but produced no narrative response.";
+              void speak(spoken);
+            }
+          },
+          () => { /* stream closed */ },
+        );
+        cleanupRef.current.push(closeStream);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+        setOrbState("error");
+        window.setTimeout(() => setOrbState("idle"), 1500);
+      }
+    },
+    [applyEvent, setOrbState, setTranscript, speak, startRun, subscribeSecondary],
+  );
+
+  const startListening = useCallback(async () => {
+    if (isActive) return;
+    setError(null);
+    if (!window.isSecureContext) {
+      setError("Microphone requires a secure connection. Access the app via HTTPS (or localhost for dev).");
+      return;
+    }
+    if (!isSpeechRecognitionSupported()) {
+      setError("Voice input not supported in this browser. Use Chrome or Edge.");
+      return;
+    }
+    setIsActive(true);
+    setTranscript("");
+    setOrbState("listening");
+
+    const stopMic = await startMicLevelMonitor((v) => setInputLevel(v));
+    cleanupRef.current.push(stopMic);
+
+    const session = startSpeech({
+      onInterim: (t) => setTranscript(t),
+      onFinal: (t) => {
+        setInputLevel(0);
+        stopMic();
+        void handleTranscript(t);
+      },
+      onError: (msg) => {
+        setError(msg);
+        setIsActive(false);
+        setInputLevel(0);
+        setOrbState("idle");
+        stopMic();
+      },
+      onEnd: () => {
+        setIsActive(false);
+        setInputLevel(0);
+      },
+    });
+    if (session) cleanupRef.current.push(session.stop);
+  }, [handleTranscript, isActive, setInputLevel, setOrbState, setTranscript]);
+
+  const stop = useCallback(() => {
+    cleanupAll();
+    setIsActive(false);
+    setInputLevel(0);
+    setOutputLevel(0);
+    setOrbState("idle");
+  }, [cleanupAll, setInputLevel, setOrbState, setOutputLevel]);
+
+  useEffect(() => () => cleanupAll(), [cleanupAll]);
+
+  return { startListening, stop, speak, isActive, error, activeRunId, setGraph, sendText: handleTranscript };
+}

@@ -51,7 +51,8 @@ class SupplierScorer:
                       sc.Purity_Qualifier, sc.Last_Updated,
                       sc.Provenance_Confidence, sc.Corroboration_Score,
                       sc.URL_Archetype, sc.URL_Health,
-                      COALESCE(sm.Vetted, 0) as vetted
+                      COALESCE(sm.Vetted, 0) as vetted,
+                      sm.LEI, sm.Legal_Name
                FROM Supplier_Commercial sc
                JOIN Supplier s ON s.Id = sc.SupplierId
                LEFT JOIN Supplier_Master sm ON sm.SupplierId = sc.SupplierId
